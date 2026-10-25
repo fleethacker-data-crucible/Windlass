@@ -72,7 +72,7 @@ def resolve_checkpoint(model: str, token: str | None = None) -> Path:
 def default_shards_dir(model: str, compression: str | None) -> Path:
     """Where shards go when ``--shards-dir`` is not given.
 
-    ``$WINDLASS_SHARDS`` if set, else ``%LOCALAPPDATA%\Windlass\shards`` on Windows and
+    ``$WINDLASS_SHARDS`` if set, else ``%LOCALAPPDATA%/Windlass/shards`` on Windows and
     ``~/.cache/windlass/shards`` elsewhere; one folder per model and compression.
     """
     root = os.environ.get("WINDLASS_SHARDS")
