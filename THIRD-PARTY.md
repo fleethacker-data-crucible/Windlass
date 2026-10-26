@@ -1,33 +1,27 @@
 # Third-party notices
 
+Windlass ships no third-party code at run time: no packages, no DLLs. The sources below are ported or adapted into its own C#.
+
+## llama.cpp / ggml
+
+- Project: [llama.cpp](https://github.com/ggml-org/llama.cpp), Copyright (c) 2023-2026 The ggml authors
+- Licence: MIT (full text in [LICENSES/llama.cpp-MIT.txt](LICENSES/llama.cpp-MIT.txt))
+
+Ported from it: the GGUF format reader (`src/Gguf.cs`, after `gguf.md`), the weight decoders (`src/Quants.cs`, after the `dequantize_row_*` reference functions in `ggml-quants.c`; the fused dot kernels follow the same layouts), the tokenizers (`src/Tokenizer.cs`, after `llm_tokenizer_bpe` and `llm_tokenizer_spm` in `llama-vocab.cpp`, including the pre-tokenizer regexes), the model hyperparameter keys (`src/ModelConfig.cs`), the forward pass layout (`src/Transformer.cs`, after `llm_build_llama`, `llm_build_qwen2` and `llm_build_qwen3`) and the built-in chat templates (`src/ChatTemplate.cs`). The test fixture `tests/fixtures/llama-cpp-reference.txt` holds outputs computed with llama.cpp (through llama-cpp-python 0.3.36 on a development machine).
+
+## Phoenix LAI
+
+- Project: [Phoenix LAI](https://github.com/fleethacker-data-crucible/phoenix-lai), Copyright (c) 2026 Jeremy Gerdes and contributors
+- Licence: MIT
+
+Taken from it: `src/Half.cs` and `src/Json.cs` (unchanged apart from the namespace and integer output), and the byte-level BPE part of `src/Tokenizer.cs`.
+
+## FleetHacker edge-ops
+
+- `src/FleetPort.psm1` is a copy of [tools/fleet-port/FleetPort.psm1](https://github.com/fleethacker-data-crucible/edge-ops/tree/main/tools/fleet-port) (MIT), the suite's port-block and self-detection helper. `PSScriptAnalyzerSettings.psd1` and `.gitattributes` come from edge-ops too.
+
 ## AirLLM
 
-- Project: [AirLLM](https://github.com/lyogavin/airllm) by Gavin Li and contributors
-- Licence: Apache License 2.0 (full text in [LICENSES/AirLLM-Apache-2.0.txt](LICENSES/AirLLM-Apache-2.0.txt))
-- Reviewed at commit `c2ac5944b3a6b13050b021dd64d4462cecf2bcb7` (2026-10-25)
+- Project: [AirLLM](https://github.com/lyogavin/airllm) by Gavin Li and contributors, Apache License 2.0
 
-Windlass is a clean refactor of AirLLM's technique, not a copy of its code. The ideas taken from AirLLM are:
-
-- splitting a checkpoint into one safetensors file per layer (embeddings, each decoder layer, final norm, output head);
-- building the Transformers model on the `meta` device and attaching forward hooks that load each layer's weights just before it runs and free them just after;
-- prefetching the next layer on a worker thread while the current one computes, with a size cap on pinned host memory;
-- keeping a tied embedding resident instead of streaming it;
-- compressing layer shards to 8-bit or 4-bit to cut disk reads.
-
-The files that implement these ideas, and so are modified works of AirLLM under section 4 of the Apache License, are:
-
-- `windlass/engine/shards.py`
-- `windlass/engine/layered.py`
-- `windlass/engine/quant.py` (re-implemented in plain PyTorch instead of bitsandbytes)
-
-Everything else (the HTTP server, the scheduler, the generation loop, the tests and the scripts) is original to Windlass. Windlass as a whole is licensed under MIT; the files above remain subject to the Apache License 2.0 as well.
-
-AirLLM ships no NOTICE file, so there is no NOTICE text to carry over.
-
-## NF4 code values
-
-The 16 NF4 code values in `windlass/engine/quant.py` come from the QLoRA paper (Dettmers et al., 2023, "QLoRA: Efficient Finetuning of Quantized LLMs"), as published in bitsandbytes (MIT).
-
-## Runtime dependencies
-
-Windlass installs, but does not vendor, PyTorch (BSD-3-Clause), Hugging Face Transformers, Accelerate, safetensors and huggingface_hub (Apache-2.0), FastAPI (MIT), Uvicorn (BSD-3-Clause) and, for tests, pytest (MIT) and HTTPX (BSD-3-Clause).
+Windlass takes the idea of layer-by-layer inference from AirLLM: keep one layer in memory, load each layer just before it runs and free it after, prefetch the next layer while the current one computes, and keep the KV cache across layers. Windlass v0.1 was a Python refactor of AirLLM's code; v0.2 is a new C# implementation over GGUF files and contains no AirLLM code.
