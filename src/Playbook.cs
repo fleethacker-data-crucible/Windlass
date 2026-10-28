@@ -117,6 +117,9 @@ namespace Windlass
         public string MachineKey, ModelKey, ModelId, Created;
         // Measured by `probe` (0 = not measured). LayerSecBatch: one layer for a token plus MaxGuesses guesses at once.
         public double ReadGBps, LayerSecPhysical, LayerSecLogical, LayerSecBatch;
+        // Measured by `playbook eval`: perplexity on the built-in passage (lower is better) and prompt reading speed.
+        public double QualityPerplexity, PromptSecPerToken;
+        public int QualityTokens;
         // Observed in real runs on this machine (totals since the playbook was measured).
         public long ObsRuns, ObsPromptTokens, ObsTokens, ObsGuessed, ObsAccepted;
         public double ObsPromptSeconds, ObsSeconds;
@@ -130,6 +133,11 @@ namespace Windlass
         public bool Measured { get { return LayerSecPhysical > 0 && LayerSecLogical > 0 && ReadGBps > 0; } }
         public const int MinGuessesToJudge = 200;
         public const double MinKeptRate = 0.15, MaxBatchCost = 2.5;
+
+        public void SetQuality(QualityResult q)
+        {
+            QualityPerplexity = q.Perplexity; QualityTokens = q.Tokens; PromptSecPerToken = q.SecPerPromptToken;
+        }
 
         public void Observe(int promptTokens, double promptSeconds, int tokens, double seconds, int guessed, int accepted)
         {
@@ -157,6 +165,7 @@ namespace Windlass
                 p.ObsRuns = history.ObsRuns; p.ObsPromptTokens = history.ObsPromptTokens; p.ObsPromptSeconds = history.ObsPromptSeconds;
                 p.ObsTokens = history.ObsTokens; p.ObsSeconds = history.ObsSeconds;
                 p.ObsGuessed = history.ObsGuessed; p.ObsAccepted = history.ObsAccepted;
+                p.QualityPerplexity = history.QualityPerplexity; p.QualityTokens = history.QualityTokens; p.PromptSecPerToken = history.PromptSecPerToken;
             }
 
             // 1. RAM budget: leave room for Windows and the other programs on this computer.
@@ -259,7 +268,12 @@ namespace Windlass
                     : "Guess-ahead off: the whole model is in RAM, so guesses cost extra math. Run `playbook probe` to measure whether they pay off here.");
             }
 
-            // 8. What real runs on this machine showed.
+            // 8. Quality, when `playbook eval` has scored this model here.
+            if (p.QualityPerplexity > 0)
+                p.Rules.Add("Quality: perplexity " + F(p.QualityPerplexity, "F2") + " on " + p.QualityTokens + " tokens of the built-in passage (lower is better; compare only models with the same tokenizer). " +
+                            "Prompts read at " + F(p.PromptSecPerToken, "F2") + " s per token, so a 1,000-token prompt takes about " + F(1000 * p.PromptSecPerToken / 60, "F0") + " min.");
+
+            // 9. What real runs on this machine showed.
             if (p.ObsTokens >= 20 && p.ObsSeconds > 0)
             {
                 string line = "Recent runs: " + F(p.ObsSeconds / p.ObsTokens, "F2") + " s per reply token over " + p.ObsTokens + " tokens in " + p.ObsRuns + " replies";
@@ -297,6 +311,10 @@ namespace Windlass
             ob["runs"] = ObsRuns; ob["promptTokens"] = ObsPromptTokens; ob["promptSeconds"] = ObsPromptSeconds;
             ob["tokens"] = ObsTokens; ob["seconds"] = ObsSeconds; ob["guessed"] = ObsGuessed; ob["accepted"] = ObsAccepted;
             d["observed"] = ob;
+            Dictionary<string, object> q = new Dictionary<string, object>();
+            q["perplexity"] = QualityPerplexity; q["tokens"] = (long)QualityTokens; q["promptSecPerToken"] = PromptSecPerToken;
+            q["passage"] = "Windlass test passage v1 (original, built in)";
+            d["quality"] = q;
             Dictionary<string, object> st = new Dictionary<string, object>();
             st["cacheGB"] = Math.Round(CacheBytes / 1e9, 2); st["prefetch"] = Prefetch; st["contextLength"] = (long)ContextLength;
             st["threads"] = (long)Threads; st["speculate"] = Speculate; st["predictedSecPerToken"] = PredictedSecPerToken;
@@ -332,6 +350,13 @@ namespace Windlass
                 p.ObsPromptTokens = (long)Json.GetNum(ob, "promptTokens", 0); p.ObsPromptSeconds = Json.GetNum(ob, "promptSeconds", 0);
                 p.ObsTokens = (long)Json.GetNum(ob, "tokens", 0); p.ObsSeconds = Json.GetNum(ob, "seconds", 0);
                 p.ObsGuessed = (long)Json.GetNum(ob, "guessed", 0); p.ObsAccepted = (long)Json.GetNum(ob, "accepted", 0);
+            }
+            if (d.TryGetValue("quality", out v) && v is Dictionary<string, object>)
+            {
+                Dictionary<string, object> q = (Dictionary<string, object>)v;
+                p.QualityPerplexity = Json.GetNum(q, "perplexity", 0);
+                p.QualityTokens = (int)Json.GetNum(q, "tokens", 0);
+                p.PromptSecPerToken = Json.GetNum(q, "promptSecPerToken", 0);
             }
             return p;
         }

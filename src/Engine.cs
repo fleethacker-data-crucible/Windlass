@@ -194,6 +194,28 @@ namespace Windlass
             }
         }
 
+        // Scores the model on the built-in passage (see Quality.cs). Clears the KV cache, like a new conversation.
+        public QualityResult Evaluate(int maxTokens, CancellationToken cancel)
+        {
+            lock (_run)
+            {
+                List<int> ids = Tokenizer.Encode(Quality.Passage, true, false);
+                int n = Math.Min(Math.Min(ids.Count, maxTokens), ContextLength);
+                if (n < 2) throw new ArgumentException("The passage is too short to score with " + maxTokens + " tokens.");
+                int[] toks = ids.GetRange(0, n).ToArray();
+                Model.Truncate(0);
+                _cached.Clear();
+                Stopwatch sw = Stopwatch.StartNew();
+                float[] logits = Model.Forward(toks, 0, true, cancel, null);
+                QualityResult r = new QualityResult();
+                r.Seconds = sw.Elapsed.TotalSeconds;
+                r.Tokens = n;
+                r.Perplexity = Quality.Perplexity(logits, toks);
+                Model.Truncate(0);
+                return r;
+            }
+        }
+
         public const int MaxGuesses = 8;
 
         // Prompt-lookup guessing: find the latest earlier place where the last few tokens appeared, and guess that

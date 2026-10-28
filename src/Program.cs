@@ -24,6 +24,8 @@ namespace Windlass
                           measure this computer and write its playbook for the model (also: probe)
   Launch-Windlass.bat playbook show  --model <file.gguf> [--json] [--out <file>]
                           the settings serve and run would use now, and why (measures nothing)
+  Launch-Windlass.bat playbook eval  --model <file.gguf> [--tokens <n>] [--json] [--out <file>]
+                          score quality: perplexity on a built-in passage (lower is better), and prompt speed
   Launch-Windlass.bat commands [--json]   every command with its inputs and outputs
 
 serve and run pick their settings from this computer's playbook (RAM free, cores, battery; plus measurements after
@@ -85,6 +87,7 @@ Options:
                     case "info": return Info(o);
                     case "playbook probe": return PlaybookCommand(o, root, true);
                     case "playbook show": return PlaybookCommand(o, root, false);
+                    case "playbook eval": return PlaybookEval(o, root);
                     case "commands": return Commands(o);
                 }
                 Console.Error.WriteLine("Unknown command '" + command + "'.\n\n" + Usage);
@@ -205,7 +208,13 @@ Options:
             MachineFacts m = MachineFacts.Detect();
             string file = Playbook.PathFor(root, id);
             if (measure && !json) Console.WriteLine("Measuring: reading a few layers and timing one layer's math...");
-            Playbook p = Playbook.Plan(m, s, measure ? Measure(g, c, m) : Playbook.LoadHistory(file, m, s));
+            Playbook history = Playbook.LoadHistory(file, m, s), measured = null;
+            if (measure)
+            {
+                measured = Measure(g, c, m);
+                if (history != null) { measured.QualityPerplexity = history.QualityPerplexity; measured.QualityTokens = history.QualityTokens; measured.PromptSecPerToken = history.PromptSecPerToken; }
+            }
+            Playbook p = Playbook.Plan(m, s, measure ? measured : history);
             p.Save(file, m);
 
             string outPath;
@@ -236,6 +245,51 @@ Options:
             return 0;
         }
 
+        // playbook eval: loads the model with this computer's settings, scores it on the built-in passage and records
+        // the score in the playbook, where playbook show reports it next to the speed.
+        static int PlaybookEval(Dictionary<string, string> o, string root)
+        {
+            bool json = o.ContainsKey("json");
+            EngineOptions e = Engine(o, root);
+            e.PlaybookPath = null;   // the eval pass is not a real run; recorded below as quality instead
+            int tokens = Int(o, "tokens", Quality.DefaultTokens, 2, 1 << 20);
+            LayeredBackend b = new LayeredBackend(e);
+            QualityResult q;
+            try
+            {
+                if (!json) Console.WriteLine("Loading " + b.ModelId + " and scoring it on " + tokens + " tokens of the built-in passage...");
+                b.Load();
+                q = b.Evaluate(tokens, CancellationToken.None);
+            }
+            finally { b.Dispose(); }
+            Playbook p = e.Playbook;
+            string file = p != null ? Playbook.PathFor(root, b.ModelId) : null;
+            if (p != null)
+            {
+                // Re-plan so the quality rule is in the saved rules; free RAM is read again.
+                p.SetQuality(q);
+                GgufModelFile g = GgufModelFile.Open(e.ModelPath);
+                ModelShape s = ModelShape.From(g, ModelConfig.From(g), b.ModelId);
+                p = Playbook.Plan(e.Machine, s, p);
+                p.Save(file, e.Machine);
+            }
+            string outPath;
+            if (json || o.TryGetValue("out", out outPath))
+            {
+                Dictionary<string, object> r = new Dictionary<string, object>();
+                r["schema"] = "windlass.quality/1"; r["model"] = b.ModelId; r["perplexity"] = q.Perplexity; r["tokens"] = (long)q.Tokens;
+                r["seconds"] = q.Seconds; r["promptSecPerToken"] = q.SecPerPromptToken; r["passage"] = "Windlass test passage v1 (original, built in)";
+                string doc = Json.Write(r);
+                if (o.TryGetValue("out", out outPath)) File.WriteAllText(Path.GetFullPath(outPath), doc, new UTF8Encoding(false));
+                else Console.WriteLine(doc);
+                return 0;
+            }
+            Console.WriteLine("perplexity      " + q.Perplexity.ToString("F2") + " on " + q.Tokens + " tokens (lower is better; compare models with the same tokenizer)");
+            Console.WriteLine("prompt speed    " + q.SecPerPromptToken.ToString("F3") + " s per token (" + q.Seconds.ToString("F1") + " s in all)");
+            if (file != null) Console.WriteLine("recorded in     " + file);
+            return 0;
+        }
+
         // commands: the CLI describes itself, so an agent can find every command and its inputs and outputs.
         static readonly string[][] CommandList =
         {
@@ -244,6 +298,7 @@ Options:
             new[] { "info", "--model", "the model's shape, sizes and RAM needs (text)" },
             new[] { "playbook probe", "--model [--model-id --json --out]", "windlass.playbook/1: machine, measurements, settings, rules; saved in playbooks\\" },
             new[] { "playbook show", "--model [--model-id --json --out]", "windlass.playbook/1 for the settings serve and run would use now" },
+            new[] { "playbook eval", "--model [--model-id --tokens --json --out]", "windlass.playbook/1 with quality: perplexity on the built-in passage (lower is better) and prompt seconds per token" },
             new[] { "commands", "[--json]", "windlass.commands/1: this list" },
         };
 

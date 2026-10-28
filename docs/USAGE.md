@@ -8,6 +8,7 @@ Launch-Windlass.bat info  --model D:\models\model.gguf                 :: shape,
 Launch-Windlass.bat run   --model D:\models\model.gguf --prompt "Hi"   :: one reply in the console, no server
 Launch-Windlass.bat playbook probe --model D:\models\model.gguf        :: measure this computer, write its playbook
 Launch-Windlass.bat playbook show  --model D:\models\model.gguf        :: the settings serve and run would use now, and why
+Launch-Windlass.bat playbook eval  --model D:\models\model.gguf        :: quality score (perplexity) and prompt speed
 Launch-Windlass.bat commands --json                                    :: every command, for scripts and agents
 Launch-Windlass.bat check                                              :: locality checks and compile only
 Launch-Windlass.bat help                                               :: every option
@@ -41,7 +42,12 @@ guess-ahead turns itself off where guesses rarely come true). A new `playbook pr
 and the model file stay the same; free RAM is checked again at every start. Every choice is logged with its reason,
 `playbook show` prints them without starting anything, and any option you give yourself wins.
 
-`--json` on `playbook probe`, `playbook show` and `commands` prints a versioned JSON document (`windlass.playbook/1`,
+`playbook eval` scores the model's quality on this machine: perplexity on a built-in passage written for the test (so no model has memorised it) (lower is
+better; compare quantizations of one model, or models that share a tokenizer) and the seconds per prompt token. The
+score is kept in the playbook and shown by `playbook show`. How speed and quality are meant to trade off is in
+[SPEED-QUALITY.md](SPEED-QUALITY.md).
+
+`--json` on `playbook probe`, `playbook show`, `playbook eval` and `commands` prints a versioned JSON document (`windlass.playbook/1`,
 `windlass.commands/1`), and `--out <file>` writes it as UTF-8 without a BOM, so scripts and agents can use them
 (see the Fleet CLI parity proposal). Exit code 0 is success, 1 an error, 2 a usage error.
 
