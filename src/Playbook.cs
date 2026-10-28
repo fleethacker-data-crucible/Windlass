@@ -80,7 +80,7 @@ namespace Windlass
         public int Layers, ModelContext;
         public long StreamedBytes;           // every stage (layers + output head)
         public long SlotBytes;               // the largest stage
-        public long KvBytesPerToken;         // fp32 K and V for every layer
+        public long KvBytesPerToken;         // fp16 K and V for every layer
 
         public static ModelShape From(GgufModelFile g, ModelConfig c, string id)
         {
@@ -88,7 +88,7 @@ namespace Windlass
             s.Id = id;
             s.Layers = c.Layers;
             s.ModelContext = c.ContextLength;
-            s.KvBytesPerToken = 2L * c.Layers * c.KvDim * 4;
+            s.KvBytesPerToken = 2L * c.Layers * c.KvDim * 2;    // fp16 K and V
             long[] stage = new long[c.Layers + 1];
             foreach (GgufTensor t in g.Tensors)
             {
@@ -115,26 +115,49 @@ namespace Windlass
         public const int DefaultContextCap = 8192, MinContext = 2048;
 
         public string MachineKey, ModelKey, ModelId, Created;
-        // Measured by `probe` (0 = not measured).
-        public double ReadGBps, LayerSecPhysical, LayerSecLogical;
+        // Measured by `probe` (0 = not measured). LayerSecBatch: one layer for a token plus MaxGuesses guesses at once.
+        public double ReadGBps, LayerSecPhysical, LayerSecLogical, LayerSecBatch;
+        // Observed in real runs on this machine (totals since the playbook was measured).
+        public long ObsRuns, ObsPromptTokens, ObsTokens, ObsGuessed, ObsAccepted;
+        public double ObsPromptSeconds, ObsSeconds;
         // Chosen settings.
         public long CacheBytes;
-        public bool Prefetch;
+        public bool Prefetch, Speculate;
         public int ContextLength, Threads;
         public double PredictedSecPerToken;
         public readonly List<string> Rules = new List<string>();
 
         public bool Measured { get { return LayerSecPhysical > 0 && LayerSecLogical > 0 && ReadGBps > 0; } }
+        public const int MinGuessesToJudge = 200;
+        public const double MinKeptRate = 0.15, MaxBatchCost = 2.5;
+
+        public void Observe(int promptTokens, double promptSeconds, int tokens, double seconds, int guessed, int accepted)
+        {
+            ObsRuns++;
+            ObsPromptTokens += promptTokens; ObsPromptSeconds += promptSeconds;
+            ObsTokens += tokens; ObsSeconds += seconds;
+            ObsGuessed += guessed; ObsAccepted += accepted;
+        }
 
         static string Gb(long b) { return (b / 1e9).ToString("F1", CultureInfo.InvariantCulture) + " GB"; }
 
-        // The rule book. measured may be null (then the thread count and the prediction use defaults).
-        public static Playbook Plan(MachineFacts m, ModelShape s, Playbook measured)
+        static string F(double v, string fmt) { return v.ToString(fmt, CultureInfo.InvariantCulture); }
+
+        // The rule book. history (measurements and real runs from earlier) may be null: then the thread count, the
+        // guess-ahead choice and the prediction fall back to defaults.
+        public static Playbook Plan(MachineFacts m, ModelShape s, Playbook history)
         {
             Playbook p = new Playbook();
             p.MachineKey = m.Key; p.ModelKey = s.Key; p.ModelId = s.Id;
             p.Created = DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture);
-            if (measured != null) { p.ReadGBps = measured.ReadGBps; p.LayerSecPhysical = measured.LayerSecPhysical; p.LayerSecLogical = measured.LayerSecLogical; }
+            if (history != null)
+            {
+                p.ReadGBps = history.ReadGBps; p.LayerSecPhysical = history.LayerSecPhysical;
+                p.LayerSecLogical = history.LayerSecLogical; p.LayerSecBatch = history.LayerSecBatch;
+                p.ObsRuns = history.ObsRuns; p.ObsPromptTokens = history.ObsPromptTokens; p.ObsPromptSeconds = history.ObsPromptSeconds;
+                p.ObsTokens = history.ObsTokens; p.ObsSeconds = history.ObsSeconds;
+                p.ObsGuessed = history.ObsGuessed; p.ObsAccepted = history.ObsAccepted;
+            }
 
             // 1. RAM budget: leave room for Windows and the other programs on this computer.
             long reserve = Math.Max(4 * GB, m.TotalRam * 15 / 100);
@@ -200,14 +223,50 @@ namespace Windlass
             }
 
             // 6. Prediction from the measurements: reading the unpinned share vs computing every layer.
+            double read = 0;
             if (p.LayerSecPhysical > 0 && p.ReadGBps > 0)
             {
                 double compute = s.Layers * (p.Threads == m.PhysicalCores && m.PhysicalCores < m.LogicalCores ? p.LayerSecPhysical : p.LayerSecLogical);
-                double read = (s.StreamedBytes - p.CacheBytes) / (p.ReadGBps * GB);
+                read = (s.StreamedBytes - p.CacheBytes) / (p.ReadGBps * GB);
                 p.PredictedSecPerToken = p.Prefetch ? Math.Max(compute, read) : compute + read;
-                p.Rules.Add("Expect about " + p.PredictedSecPerToken.ToString("F1", CultureInfo.InvariantCulture) + " s per token (compute " +
-                            compute.ToString("F1", CultureInfo.InvariantCulture) + " s, reading " + read.ToString("F1", CultureInfo.InvariantCulture) + " s" +
+                p.Rules.Add("Expect about " + F(p.PredictedSecPerToken, "F1") + " s per token (compute " + F(compute, "F1") + " s, reading " + F(read, "F1") + " s" +
                             (read > compute ? "; the disk is the limit" : "; the CPU is the limit") + ").");
+            }
+
+            // 7. Guess-ahead (greedy replies only): checking a token plus several guesses costs one pass. It pays off
+            //    when that pass is cheap next to a normal token (reading dominates) and enough guesses turn out right.
+            double kept = p.ObsGuessed > 0 ? (double)p.ObsAccepted / p.ObsGuessed : 0;
+            if (p.ObsGuessed >= MinGuessesToJudge && kept < MinKeptRate)
+            {
+                p.Speculate = false;
+                p.Rules.Add("Guess-ahead off: in real runs here only " + F(100 * kept, "F0") + "% of " + p.ObsGuessed + " guesses were right, too few to pay for checking them.");
+            }
+            else if (p.LayerSecBatch > 0 && p.PredictedSecPerToken > 0)
+            {
+                double batchCompute = s.Layers * p.LayerSecBatch;
+                double batch = p.Prefetch ? Math.Max(batchCompute, read) : batchCompute + read;
+                double cost = batch / p.PredictedSecPerToken;
+                p.Speculate = cost <= MaxBatchCost;
+                p.Rules.Add(p.Speculate
+                    ? "Guess-ahead on for greedy replies: checking a token and " + LayeredBackend.MaxGuesses + " guesses costs " + F(cost, "F1") + "x a normal token, so it pays off once about " + Math.Max(1, (int)Math.Ceiling(cost - 1)) + " guesses per pass are right."
+                    : "Guess-ahead off: checking " + LayeredBackend.MaxGuesses + " guesses costs " + F(cost, "F1") + "x a normal token on this machine, more than the guesses usually save.");
+            }
+            else
+            {
+                p.Speculate = p.CacheBytes < s.StreamedBytes;
+                p.Rules.Add(p.Speculate
+                    ? "Guess-ahead on for greedy replies: most of a token's time goes to reading layers, and a batch of guesses shares that read."
+                    : "Guess-ahead off: the whole model is in RAM, so guesses cost extra math. Run `playbook probe` to measure whether they pay off here.");
+            }
+
+            // 8. What real runs on this machine showed.
+            if (p.ObsTokens >= 20 && p.ObsSeconds > 0)
+            {
+                string line = "Recent runs: " + F(p.ObsSeconds / p.ObsTokens, "F2") + " s per reply token over " + p.ObsTokens + " tokens in " + p.ObsRuns + " replies";
+                if (p.ObsPromptTokens > 0 && p.ObsPromptSeconds > 0) line += ", " + F(p.ObsPromptSeconds / p.ObsPromptTokens, "F2") + " s per prompt token";
+                if (p.ObsGuessed > 0) line += ", " + F(100 * kept, "F0") + "% of guesses kept";
+                if (p.PredictedSecPerToken > 0) line += " (predicted " + F(p.PredictedSecPerToken, "F2") + " s per token)";
+                p.Rules.Add(line + ".");
             }
             return p;
         }
@@ -232,18 +291,23 @@ namespace Windlass
             List<object> gpus = new List<object>(); foreach (string g in m.Gpus) gpus.Add(g); mf["gpus"] = gpus;
             d["machine"] = mf;
             Dictionary<string, object> me = new Dictionary<string, object>();
-            me["readGBps"] = ReadGBps; me["layerSecPhysical"] = LayerSecPhysical; me["layerSecLogical"] = LayerSecLogical;
+            me["readGBps"] = ReadGBps; me["layerSecPhysical"] = LayerSecPhysical; me["layerSecLogical"] = LayerSecLogical; me["layerSecBatch"] = LayerSecBatch;
             d["measured"] = me;
+            Dictionary<string, object> ob = new Dictionary<string, object>();
+            ob["runs"] = ObsRuns; ob["promptTokens"] = ObsPromptTokens; ob["promptSeconds"] = ObsPromptSeconds;
+            ob["tokens"] = ObsTokens; ob["seconds"] = ObsSeconds; ob["guessed"] = ObsGuessed; ob["accepted"] = ObsAccepted;
+            d["observed"] = ob;
             Dictionary<string, object> st = new Dictionary<string, object>();
             st["cacheGB"] = Math.Round(CacheBytes / 1e9, 2); st["prefetch"] = Prefetch; st["contextLength"] = (long)ContextLength;
-            st["threads"] = (long)Threads; st["predictedSecPerToken"] = PredictedSecPerToken;
+            st["threads"] = (long)Threads; st["speculate"] = Speculate; st["predictedSecPerToken"] = PredictedSecPerToken;
             d["settings"] = st;
             List<object> rules = new List<object>(); foreach (string r in Rules) rules.Add(r); d["rules"] = rules;
             return Json.Write(d);
         }
 
-        // The measurements of a saved playbook, if it was made on this machine for this model file; otherwise null.
-        public static Playbook LoadMeasured(string path, MachineFacts m, ModelShape s)
+        // The measurements and real-run totals of a saved playbook, if it was made on this machine for this model file;
+        // otherwise null (a new computer or a changed model starts over).
+        public static Playbook LoadHistory(string path, MachineFacts m, ModelShape s)
         {
             if (!File.Exists(path)) return null;
             Dictionary<string, object> d;
@@ -251,20 +315,31 @@ namespace Windlass
             catch (FormatException) { return null; }
             catch (IOException) { return null; }
             if (d == null || Json.GetStr(d, "machineKey", "") != m.Key || Json.GetStr(d, "modelKey", "") != s.Key) return null;
-            object me;
-            if (!d.TryGetValue("measured", out me) || !(me is Dictionary<string, object>)) return null;
-            Dictionary<string, object> mm = (Dictionary<string, object>)me;
             Playbook p = new Playbook();
-            p.ReadGBps = Json.GetNum(mm, "readGBps", 0);
-            p.LayerSecPhysical = Json.GetNum(mm, "layerSecPhysical", 0);
-            p.LayerSecLogical = Json.GetNum(mm, "layerSecLogical", 0);
-            return p.Measured ? p : null;
+            object v;
+            if (d.TryGetValue("measured", out v) && v is Dictionary<string, object>)
+            {
+                Dictionary<string, object> mm = (Dictionary<string, object>)v;
+                p.ReadGBps = Json.GetNum(mm, "readGBps", 0);
+                p.LayerSecPhysical = Json.GetNum(mm, "layerSecPhysical", 0);
+                p.LayerSecLogical = Json.GetNum(mm, "layerSecLogical", 0);
+                p.LayerSecBatch = Json.GetNum(mm, "layerSecBatch", 0);
+            }
+            if (d.TryGetValue("observed", out v) && v is Dictionary<string, object>)
+            {
+                Dictionary<string, object> ob = (Dictionary<string, object>)v;
+                p.ObsRuns = (long)Json.GetNum(ob, "runs", 0);
+                p.ObsPromptTokens = (long)Json.GetNum(ob, "promptTokens", 0); p.ObsPromptSeconds = Json.GetNum(ob, "promptSeconds", 0);
+                p.ObsTokens = (long)Json.GetNum(ob, "tokens", 0); p.ObsSeconds = Json.GetNum(ob, "seconds", 0);
+                p.ObsGuessed = (long)Json.GetNum(ob, "guessed", 0); p.ObsAccepted = (long)Json.GetNum(ob, "accepted", 0);
+            }
+            return p;
         }
 
         public void Save(string path, MachineFacts m)
         {
             Directory.CreateDirectory(Path.GetDirectoryName(path));
-            File.WriteAllText(path, ToJson(m));
+            File.WriteAllText(path, ToJson(m), new System.Text.UTF8Encoding(false));
         }
     }
 }

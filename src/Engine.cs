@@ -17,7 +17,10 @@ namespace Windlass
         public int ContextLength;            // 0 = min(model's, DefaultContext)
         public string ChatTemplate;          // null = detect
         public int Threads;                  // 0 = every logical core
+        public bool Speculate;               // guess-ahead for greedy replies
         public Playbook Playbook;            // the settings' reasons, logged at load (null = set by hand)
+        public string PlaybookPath;          // where real runs are recorded (null = not recorded)
+        public MachineFacts Machine;
         public const int DefaultContext = 8192;
     }
 
@@ -64,7 +67,7 @@ namespace Windlass
             Log.Info(string.Format("{0}: {1}, {2} layers, {3:F1} GB of weights, context {4}, chat template {5}",
                 ModelId, Config.Arch, Config.Layers, _g.TotalBytes / 1e9, ctx, Template.Name));
             Log.Info(string.Format("RAM: {0:F2} GB per layer slot x {1}, {2:F1} GB of layers kept resident, KV cache up to {3:F1} GB, {4} threads",
-                _stream.SlotBytes / 1e9, _o.Prefetch ? 2 : 1, _stream.CachedBytes / 1e9, 2.0 * Config.Layers * Config.KvDim * 4.0 * ctx / 1e9,
+                _stream.SlotBytes / 1e9, _o.Prefetch ? 2 : 1, _stream.CachedBytes / 1e9, 2.0 * Config.Layers * Config.KvDim * 2.0 * ctx / 1e9,
                 _o.Threads > 0 ? _o.Threads : Environment.ProcessorCount));
             Log.Info("Loaded in " + sw.Elapsed.TotalSeconds.ToString("F1") + " s");
             State = BackendState.Ready;
@@ -96,36 +99,85 @@ namespace Windlass
                 bool first = true;
                 int produced = 0;
                 string finish = "length";
+                bool guessing = _o.Speculate && req.Temperature <= 0;   // only greedy replies: then guesses never change the text
+                int guessed = 0, accepted = 0;
+                List<int> history = new List<int>(ids);                 // prompt + reply, where guesses come from
+                Stopwatch clock = Stopwatch.StartNew();
+                double promptSeconds = 0;
+
+                // Sends one token's text to the client. Returns true when a stop sequence ends the reply.
+                Func<int, bool> emit = delegate(int token)
+                {
+                    byte[] bytes = Tokenizer.TokenBytes(token, false);
+                    char[] chars = new char[utf8.GetCharCount(bytes, 0, bytes.Length, false)];
+                    utf8.GetChars(bytes, 0, bytes.Length, chars, 0, false);
+                    string text = new string(chars);
+                    if (first && text.Length > 0)
+                    {
+                        if (Tokenizer.StripLeadingSpace && text[0] == ' ') text = text.Substring(1);
+                        first = false;
+                    }
+                    bool stopped;
+                    string safe = scanner.Feed(text, out stopped);
+                    if (safe.Length > 0) onText(safe);
+                    return stopped;
+                };
                 try
                 {
                     int[] rest = ids.GetRange(common, ids.Count - common).ToArray();
                     if (common > 0) Log.Debug("reusing " + common + " cached prompt tokens");
                     float[] logits = Model.Forward(rest, common, false, cancel, onStage);
                     _cached.AddRange(rest);
+                    promptSeconds = clock.Elapsed.TotalSeconds;
+                    int id = maxTokens > 0 ? Sampler.Sample(logits, req.Temperature, req.TopP, rng) : -1;
                     while (produced < maxTokens)
                     {
-                        int id = Sampler.Sample(logits, req.Temperature, req.TopP, rng);
                         if (Tokenizer.IsEndOfGeneration(id)) { finish = "stop"; break; }
                         produced++;
-                        byte[] bytes = Tokenizer.TokenBytes(id, false);
-                        char[] chars = new char[utf8.GetCharCount(bytes, 0, bytes.Length, false)];
-                        utf8.GetChars(bytes, 0, bytes.Length, chars, 0, false);
-                        string text = new string(chars);
-                        if (first && text.Length > 0)
-                        {
-                            if (Tokenizer.StripLeadingSpace && text[0] == ' ') text = text.Substring(1);
-                            first = false;
-                        }
-                        bool stopped;
-                        string safe = scanner.Feed(text, out stopped);
-                        if (safe.Length > 0) onText(safe);
-                        if (stopped) { finish = "stop"; break; }
+                        history.Add(id);
+                        if (emit(id)) { finish = "stop"; break; }
                         if (produced >= maxTokens) break;
-                        logits = Model.Forward(new int[] { id }, _cached.Count, false, cancel, onStage);
+
+                        int room = Math.Min(MaxGuesses, Math.Min(maxTokens - produced, ContextLength - _cached.Count - 1));
+                        int[] draft = guessing && room > 0 ? Guess(history, room) : null;
+                        if (draft == null)
+                        {
+                            logits = Model.Forward(new int[] { id }, _cached.Count, false, cancel, onStage);
+                            _cached.Add(id);
+                            id = Sampler.Sample(logits, req.Temperature, req.TopP, rng);
+                            continue;
+                        }
+
+                        // Check the token and every guess in one pass; keep the guesses the model agrees with.
+                        int[] batch = new int[draft.Length + 1];
+                        batch[0] = id;
+                        Array.Copy(draft, 0, batch, 1, draft.Length);
+                        int basePos = _cached.Count;
+                        float[] all = Model.Forward(batch, basePos, true, cancel, onStage);
+                        int vocab = all.Length / batch.Length, m = 0;
+                        while (m < draft.Length && Argmax(all, (long)m * vocab, vocab) == draft[m]) m++;
+                        Model.Truncate(basePos + 1 + m);
                         _cached.Add(id);
+                        for (int j = 0; j < m; j++) _cached.Add(draft[j]);
+                        guessed += draft.Length; accepted += m;
+                        int next = Argmax(all, (long)m * vocab, vocab);
+                        bool done = false;
+                        for (int j = 0; j < m && !done; j++)
+                        {
+                            int t = draft[j];
+                            if (Tokenizer.IsEndOfGeneration(t)) { finish = "stop"; done = true; break; }
+                            produced++;
+                            history.Add(t);
+                            if (emit(t)) { finish = "stop"; done = true; }
+                            else if (produced >= maxTokens) done = true;
+                        }
+                        if (done) break;
+                        id = next;
                     }
                     string tail = scanner.Flush();   // empty after a stop sequence
                     if (tail.Length > 0) onText(tail);
+                    if (guessed > 0) Log.Debug("guess-ahead: " + accepted + " of " + guessed + " guesses kept");
+                    Observe(ids.Count - common, promptSeconds, produced, clock.Elapsed.TotalSeconds - promptSeconds, guessed, accepted);
                     return new GenerationResult(finish, ids.Count, produced);
                 }
                 catch (OperationCanceledException)
@@ -140,6 +192,45 @@ namespace Windlass
                     throw;
                 }
             }
+        }
+
+        public const int MaxGuesses = 8;
+
+        // Prompt-lookup guessing: find the latest earlier place where the last few tokens appeared, and guess that
+        // what followed them then follows them now. Edits, summaries and code repeat a lot of their input.
+        public static int[] Guess(List<int> history, int max)
+        {
+            int n = history.Count;
+            for (int len = Math.Min(3, n - 1); len >= 1; len--)
+            {
+                for (int start = n - len - 1; start >= 0; start--)
+                {
+                    int k = 0;
+                    while (k < len && history[start + k] == history[n - len + k]) k++;
+                    if (k < len) continue;
+                    int from = start + len, count = Math.Min(max, n - from);
+                    if (count <= 0) continue;
+                    return history.GetRange(from, count).ToArray();
+                }
+            }
+            return null;
+        }
+
+        static int Argmax(float[] a, long offset, int n)
+        {
+            int best = 0;
+            for (int i = 1; i < n; i++) if (a[offset + i] > a[offset + best]) best = i;
+            return best;
+        }
+
+        // Real runs teach the playbook: speed per token and how often guesses were right, saved for the next start.
+        void Observe(int promptTokens, double promptSeconds, int tokens, double seconds, int guessed, int accepted)
+        {
+            if (_o.Playbook == null || _o.PlaybookPath == null) return;
+            _o.Playbook.Observe(promptTokens, promptSeconds, tokens, seconds, guessed, accepted);
+            try { _o.Playbook.Save(_o.PlaybookPath, _o.Machine); }
+            catch (IOException e) { Log.Debug("playbook not saved: " + e.Message); }
+            catch (UnauthorizedAccessException e) { Log.Debug("playbook not saved: " + e.Message); }
         }
 
         public override void Dispose()

@@ -29,10 +29,15 @@ it runs on battery, graphics) and what the model needs (layer sizes, KV cache pe
 | Prefetch | On when two layer slots fit beside the KV cache, so reading the next layer overlaps computing this one |
 | Pinned layers | The rest of the budget keeps layers in RAM, read once instead of for every token; the whole model when it fits |
 | Threads | One per physical core on battery; otherwise the faster of physical and logical cores as measured, or all logical cores |
+| Guess-ahead | For greedy replies (temperature 0): guesses the next words from text already in the conversation and checks up to 8 in one pass. On when that pass costs at most 2.5x a normal token (measured), or, unmeasured, when the model streams from disk; off when real runs kept fewer than 15% of guesses. The reply is the same either way |
 
 `playbook probe` adds measurements: how fast this computer reads layers, and how long one layer's math takes on its
 physical and on its logical cores. With them the playbook picks the thread count and predicts seconds per token, and
-names the limit (the disk or the CPU). Playbooks are saved in `playbooks\<model>.json` and reused while the computer
+names the limit (the disk or the CPU). It also times a token plus 8 guesses in one pass, which decides guess-ahead.
+
+The playbook also learns from real runs: every reply adds its prompt and reply tokens, the time each took, and how
+many guesses were kept. `playbook show` reports them next to the prediction, and the next start uses them (for example,
+guess-ahead turns itself off where guesses rarely come true). A new `playbook probe` starts the totals over. Playbooks are saved in `playbooks\<model>.json` and reused while the computer
 and the model file stay the same; free RAM is checked again at every start. Every choice is logged with its reason,
 `playbook show` prints them without starting anything, and any option you give yourself wins.
 
@@ -52,6 +57,7 @@ and the model file stay the same; free RAM is checked again at every start. Ever
 | `--cache-gb` | playbook (`0` with `--no-playbook`) | Keep the first layers that fit in this many GB resident, so they are read from disk once. |
 | `--no-prefetch` | off | Do not read the next layer while the current one computes (saves one layer of RAM). |
 | `--threads` | playbook | Worker threads for the math. |
+| `--guess`, `--no-guess` | playbook | Guess-ahead for greedy replies on or off. |
 | `--no-playbook` | off | Ignore the playbook: the defaults below plus the options you give. |
 | `--chat-template` | detected | `llama3`, `chatml`, `mistral`, `mistral-v7` or `llama2`. |
 | `--max-tokens` | `1024` | `max_tokens` for requests that give none. |

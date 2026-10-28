@@ -13,6 +13,9 @@ namespace Windlass
             return t;
         }
 
+        // The whole half -> float table, for hot loops that index it through a pinned pointer.
+        public static float[] Lookup { get { return Table; } }
+
         public static float ToFloat(ushort h)
         {
             return Table[h];
