@@ -2,9 +2,21 @@
 
 Llama 3.3 70B Instruct (Q4_K_M, 42.5 GB) served by Windlass 0.2 on the CPU, reached directly and through Fairlead's `deep-local` route. The phases get harder as they go: errors, cancelling, a full queue, a long answer, a long prompt, a conversation that grows toward the 8k context, an hour of back-to-back requests, and finally killing Windlass.
 
-**Result: phases 1–6 passed on Windlass; phases 7 (one-hour soak) and 8 (kill and restart) are paused and will be added.** The problems it found are in Fairlead, not Windlass (see [Findings](#findings)).
+**Result: phases 1–6 passed on Windlass; phases 7 (one-hour soak) and 8 (kill and restart) are paused and will be added.** Three phases are yellow because of bugs in Fairlead, the router in front of Windlass, not in Windlass; [why, and how they turn green](#why-three-phases-are-yellow-pass).
 
-<p align="center"><img src="stress-test/scorecard.svg" alt="Scorecard of the eight phases: error handling and full queue pass with a Fairlead caveat; cancel, long answer, long prompt and long conversation (12 of 12 recalls) pass; the soak and kill-and-restart are not run yet" width="100%"></p>
+<p align="center"><img src="stress-test/scorecard.svg" alt="Scorecard of the eight phases: error handling, full queue and long prompt pass on Windlass but are yellow because of Fairlead bugs; cancel, long answer and long conversation (12 of 12 recalls) pass; the soak and kill-and-restart are not run yet" width="100%"></p>
+
+## Why three phases are yellow (PASS*)
+
+Each phase checks two things: what **Windlass** does, and what a client sees when the same request goes through **Fairlead**, the router that sits in front of Windlass on the `deep-local` route. In phases 1, 3 and 5 Windlass did exactly the right thing, so the phase passes. Fairlead then passed the result on wrongly, so the card is marked PASS* (yellow) instead of green. These are bugs in Fairlead, not in Windlass, and they are being fixed there. Once each fix is in, the phase is rerun through Fairlead and its card turns green.
+
+| Phase | Windlass did (correct) | Fairlead passed on | It should pass on | Turns green when |
+|---|---|---|---|---|
+| 1 · Error handling | Prompt too long for the 8,192-token context: `400 context_length_exceeded`, "The prompt is 13209 tokens; this server's context is 8192 tokens." | `503` "Route 'deep-local' has no target that can take this request. Add one in Fairlead's Routes page." It checked the prompt against the model's context size itself and then blamed the route. | `400 context_length_exceeded` with the size in the message, so the client knows to shorten the prompt | Fairlead returns 400 for a prompt over every target's context |
+| 3 · Full queue | Queue of 8 full: `503 server_busy` with `Retry-After: 60` | `502` "windlass answered HTTP 503: …" | `503` with the `Retry-After` header, so clients wait and retry instead of treating it as a broken server | Fairlead passes a provider's 503 and `Retry-After` through on the last target |
+| 5 · Long prompt | Read a 2,927-token prompt in 60 min while sending a keepalive every 15 s, then answered correctly | Cut the request at exactly 3,600 s, just as the answer started, with "stopped sending (OperationCanceledException)" | Keep waiting while keepalives arrive (the timeout should be a silence limit, as Fairlead's Windlass notes say), and name its own timeout in the error | Fairlead's provider timeout resets on each keepalive, and the 2,927-token prompt completes through `deep-local` |
+
+Fairlead also drops the keepalives instead of forwarding them to its clients (finding 3 below). That doesn't change a card, but fixing it with phase 5 lets clients see that a slow request is still alive.
 
 **Machine:** Ryzen 9 9950X3D (16 cores, 32 threads), 96 GB RAM, Samsung 9100 PRO PCIe 5.0 NVMe, Windows 11 Pro. GPU not used. **Model:** `Llama-3.3-70B-Instruct-Q4_K_M.gguf` (bartowski, SHA-256 `32df3bac…`). **Runs:** run 1 on 27 October 20:22–23:31 (phases 1–4, phase 5 through Fairlead, phase 6 turns 1–5), stopped when another session shut the PC down; run 2 on 28 October 02:43–06:49 (phase 5 again, phase 6 from the start, the first minutes of phase 7). Phase 5 was rerun directly against Windlass, because in run 1 Fairlead's timeout ended it.
 
@@ -52,7 +64,7 @@ Each turn only processes its own new text: Windlass keeps the conversation's KV 
 
 ## Findings
 
-Windlass did what its contract says in every phase. The issues are in Fairlead, which sits in front of it:
+Windlass did what its contract says in every phase. Findings 1–5 are in Fairlead, which sits in front of it, and are what keep phases 1, 3 and 5 yellow; they'll be fixed in Fairlead and those phases rerun:
 
 1. **Fairlead's timeout ends the whole request at 3,600 s, even while Windlass sends keepalives.** A 2,927-token prompt needs about 60 minutes of prompt processing on this CPU, so through `deep-local` it can never finish. Fairlead's own Windlass integration notes say it only cuts streams that stay silent; for slow local providers the timeout should reset on each keepalive.
 2. **Fairlead reports its own timeout as `windlass/llama-3.3-70b stopped sending (OperationCanceledException)`,** which reads like a crash in Windlass.
