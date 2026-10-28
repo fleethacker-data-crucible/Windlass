@@ -1,5 +1,5 @@
 # Windlass host. Windows PowerShell 5.1 only. ASCII only (PS 5.1 reads BOM-less .ps1 as ANSI).
-# Started by Windlass.bat:
+# Started by Launch-Windlass.bat:
 #   powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File src\Start-Windlass.ps1 serve --model <file.gguf> [options]
 #   ... -File src\Start-Windlass.ps1 check      locality checks and compile only, then exit
 # Runs the locality checks, picks a port in Windlass's block (8777-8779, policy exclusive, edge-ops PORTS.md),
@@ -13,6 +13,10 @@ if ($PSVersionTable.PSVersion.Major -ne 5) {
     Write-Host "Run Windlass with Windows PowerShell 5.1 (powershell.exe), not $($PSVersionTable.PSVersion)." -ForegroundColor Red
     exit 1
 }
+
+# Started from PowerShell 7, powershell.exe inherits 7's module paths and then loads 7's copy of
+# Microsoft.PowerShell.Utility, which fails (Import-PowerShellDataFile "is not recognized"). Keep 5.1's paths only.
+$env:PSModulePath = (@($env:PSModulePath -split ';' | Where-Object { $_ -and $_ -notmatch '\\(Documents|Program Files)\\PowerShell\\' }) + (Join-Path $PSHOME 'Modules') | Select-Object -Unique) -join ';'
 
 # Temp files (Add-Type scratch) stay inside the tool folder.
 $env:TEMP = Join-Path $root 'temp\sys'; $env:TMP = $env:TEMP

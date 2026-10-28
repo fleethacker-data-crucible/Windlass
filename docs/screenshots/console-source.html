@@ -1,0 +1,31 @@
+<!doctype html>
+<!-- Source for console-dark.png and console-light.png: the console output of a real run (Llama 3.3 70B Instruct
+     Q4_K_M on a Ryzen 9 9950X3D, 96 GB RAM, Gen5 NVMe, 2026-10-27), laid out as a console window.
+     Render: msedge --headless=new --window-size=980,442 --force-device-scale-factor=2 --screenshot=<png> <this file>?theme=dark -->
+<html><head><meta charset="utf-8"><style>
+  :root { --bg:#0c1a24; --fg:#e8dcc2; --dim:#8fa1ad; --ok:#a3d65c; --acc:#e2c48d; --bar:#14334a; --page:#071a26; }
+  .light { --bg:#fbf6ea; --fg:#132633; --dim:#5d6f7b; --ok:#4d7a1a; --acc:#8a6b45; --bar:#e9dfc8; --page:#f1e9d6; }
+  html, body { margin:0; background:var(--page); }
+  .win { margin:20px; border-radius:10px; overflow:hidden; box-shadow:0 6px 24px rgba(0,0,0,.35); background:var(--bg); }
+  .bar { background:var(--bar); color:var(--dim); font:13px "Segoe UI", sans-serif; padding:8px 14px; }
+  pre { margin:0; padding:14px 18px 18px; color:var(--fg); font:14px/1.5 Consolas, "Cascadia Mono", monospace; white-space:pre-wrap; }
+  .p { color:var(--acc); } .d { color:var(--dim); } .o { color:var(--ok); }
+</style></head><body>
+<div class="win"><div class="bar">Windlass &mdash; Windows PowerShell 5.1</div>
+<pre><span class="p">C:\Windlass&gt;</span> Launch-Windlass.bat info --model D:\models\Llama-3.3-70B-Instruct-Q4_K_M.gguf
+name            Llama 3.3 70B Instruct
+architecture    llama
+layers          80 x 0.54 GB
+weights         42.51 GB in 1 file(s)
+shape           embd 8192, heads 64/8 kv, head dim 128, vocab 128256
+tokenizer       byte-level BPE, chat template llama3
+
+<span class="p">C:\Windlass&gt;</span> Launch-Windlass.bat run --model D:\models\Llama-3.3-70B-Instruct-Q4_K_M.gguf --prompt "In one sentence, what is a ship's windlass?"
+<span class="d">INFO  Llama-3.3-70B-Instruct-Q4_K_M: llama, 80 layers, 42.5 GB of weights, context 8192, chat template llama3
+INFO  RAM: 0.86 GB per layer slot x 2, 0.0 GB of layers kept resident, KV cache up to 5.4 GB
+INFO  Loaded in 0.1 s</span>
+A ship's windlass is a mechanical device, typically located on the foredeck, used to lift and lower anchors, as well as to handle other heavy loads such as mooring lines and cargo,
+<span class="o">INFO  length: 21 prompt + 40 completion tokens in 349.3s</span>
+</pre></div>
+<script>if (new URLSearchParams(location.search).get('theme') === 'light') document.documentElement.className = 'light';</script>
+</body></html>
