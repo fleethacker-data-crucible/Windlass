@@ -17,9 +17,9 @@ namespace Windlass
         public const string Usage =
 @"Windlass: run very large GGUF models one layer at a time, behind an OpenAI-compatible API.
 
-  Windlass.bat serve --model <file.gguf> [options]   run the server on http://127.0.0.1:8777/v1
-  Windlass.bat run   --model <file.gguf> --prompt <text> [options]   one reply in the console
-  Windlass.bat info  --model <file.gguf>   model shape, sizes and RAM needed
+  Launch-Windlass.bat serve --model <file.gguf> [options]   run the server on http://127.0.0.1:8777/v1
+  Launch-Windlass.bat run   --model <file.gguf> --prompt <text> [options]   one reply in the console
+  Launch-Windlass.bat info  --model <file.gguf>   model shape, sizes and RAM needed
 
 Options:
   --model <path>          a .gguf file (for a split model, any one of its -0000N-of-0000M.gguf parts)
@@ -79,7 +79,7 @@ Options:
             for (int i = from; i < args.Length; i++)
             {
                 string a = args[i];
-                if (!a.StartsWith("--")) throw new ArgumentException("Unexpected argument '" + a + "'. Run Windlass.bat help.");
+                if (!a.StartsWith("--")) throw new ArgumentException("Unexpected argument '" + a + "'. Run Launch-Windlass.bat help.");
                 string key = a.Substring(2), val = null;
                 int eq = key.IndexOf('=');
                 if (eq >= 0) { val = key.Substring(eq + 1); key = key.Substring(0, eq); }
@@ -96,7 +96,7 @@ Options:
         static string Need(Dictionary<string, string> o, string key)
         {
             string v;
-            if (!o.TryGetValue(key, out v) || string.IsNullOrEmpty(v)) throw new ArgumentException("--" + key + " is required. Run Windlass.bat help.");
+            if (!o.TryGetValue(key, out v) || string.IsNullOrEmpty(v)) throw new ArgumentException("--" + key + " is required. Run Launch-Windlass.bat help.");
             return v;
         }
 

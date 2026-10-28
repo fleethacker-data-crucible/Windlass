@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- `Windlass.bat` is now `Launch-Windlass.bat`, the Fleet launcher name.
+- Starting Windlass from PowerShell 7 works: `Start-Windlass.ps1` drops PowerShell 7's module paths, which made `serve` fail with "Import-PowerShellDataFile is not recognized".
+- Brand: placeholder emblem (light and dark), `mark.svg`, `mark-256.png` and `favicon.ico`, rendered by `build\New-WindlassBrand.ps1`.
+- README follows the Fleet README standard: theme-aware emblem, console screenshots from a real 70B run, no badges, and the reference sections moved to `docs/` (USAGE, API, ARCHITECTURE, DEVELOPMENT).
+- First measured speeds on real models (Llama 3.2 3B and Llama 3.3 70B) in `docs/ARCHITECTURE.md`.
+
 ## 0.2.0 (2026-10-26)
 
 Rewritten in C# 5 on Windows PowerShell 5.1, the Fleet workstation stack. No Python, PyTorch or other installs.
