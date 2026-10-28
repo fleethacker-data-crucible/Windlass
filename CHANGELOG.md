@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Machine playbook: `serve` and `run` read the computer (free RAM, cores, battery) and pick the context, prefetch, how much of the model to pin in RAM, and the thread count, each with a logged reason. `playbook probe` measures read speed and layer time to choose threads and predict seconds per token; `playbook show` prints the settings without starting. Options given by hand win; `--no-playbook` turns it off.
+- `--threads`, and `commands --json`; `playbook probe|show` take `--json` and `--out` (versioned JSON, UTF-8 without a BOM), following the Fleet CLI parity proposal.
+- RoPE cos/sin tables are computed once per position instead of for every layer and token.
 - Stress-test report for Llama 3.3 70B (`docs/STRESS-TEST.md`, charts in `docs/stress-test/`): phases 1–6 pass; the soak and kill-and-restart phases are still to run.
 - `Launch-Windlass.bat` clears `PSModulePath`, and `Start-Windlass.ps1` also filters the Microsoft Store PowerShell 7 module path, so starting from PowerShell 7 works every time.
 - `Windlass.bat` is now `Launch-Windlass.bat`, the Fleet launcher name.

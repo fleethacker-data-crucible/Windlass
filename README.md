@@ -32,7 +32,7 @@ A *windlass* is the heavy winch at a ship's bow that hauls the anchor chain in l
 4. The API answers on **`http://127.0.0.1:8777/v1`** (the first free port in 8777-8779). The console shows the log.
 5. To stop: **Ctrl+C**, or `src\Stop-Windlass.ps1`.
 
-Before a long run, `Launch-Windlass.bat info --model <file>` prints the model's shape and the RAM it needs, and `Launch-Windlass.bat run --model <file> --prompt "Hi"` gives one reply in the console. All commands and options: [docs/USAGE.md](docs/USAGE.md).
+Windlass sets itself up for the computer it runs on (free RAM, cores, battery): `Launch-Windlass.bat playbook probe --model <file>` measures this computer once and shows the settings it picked and why. Before a long run, `Launch-Windlass.bat info --model <file>` prints the model's shape and the RAM it needs, and `Launch-Windlass.bat run --model <file> --prompt "Hi"` gives one reply in the console. All commands and options: [docs/USAGE.md](docs/USAGE.md).
 
 ## What it does
 

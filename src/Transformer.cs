@@ -14,7 +14,12 @@ namespace Windlass
         readonly GgufTensor _embd;
         readonly float[] _ropeFreqs;            // rope_freqs.weight (Llama 3.1+ long-context factors), or null
         readonly float[][] _k, _v;              // per layer: [position][KvDim]
+        readonly float[][] _rope;               // per position: cos/sin pairs, computed once (the same for every layer)
         int _capacity;
+
+        // Worker threads for the matrix and attention loops (0 = every logical core). Set from the machine playbook.
+        public static int Threads;
+        static ParallelOptions Par { get { ParallelOptions o = new ParallelOptions(); o.MaxDegreeOfParallelism = Threads > 0 ? Threads : -1; return o; } }
 
         public readonly int MaxContext;
         public int Length { get; private set; } // positions held in the KV cache
@@ -29,6 +34,7 @@ namespace Windlass
             if (g.TensorsByName.TryGetValue("rope_freqs.weight", out rf)) _ropeFreqs = ReadVector(g, rf);
             _k = new float[c.Layers][];
             _v = new float[c.Layers][];
+            _rope = new float[maxContext][];
         }
 
         static float[] ReadVector(GgufModelFile g, GgufTensor t)
@@ -147,7 +153,7 @@ namespace Windlass
             int H = C.Heads, HD = C.HeadDim, QD = C.QDim, KD = C.KvDim, group = C.Heads / C.KvHeads;
             float scale = 1f / (float)Math.Sqrt(HD);
             float[] K = _k[l], V = _v[l];
-            Parallel.For(0, T * H, () => new float[pos0 + T], delegate(int job, ParallelLoopState st, float[] scores)
+            Parallel.For(0, T * H, Par, () => new float[pos0 + T], delegate(int job, ParallelLoopState st, float[] scores)
             {
                 int t = job / H, h = job % H, n = pos0 + t + 1, kvh = h / group;
                 fixed (float* qp0 = q) fixed (float* Kp = K) fixed (float* Vp = V) fixed (float* op0 = outp) fixed (float* sp = scores)
@@ -177,8 +183,11 @@ namespace Windlass
         }
 
         // cos/sin per rotated pair at one position: cs[2i] = cos, cs[2i+1] = sin (ggml rope with freq_factors).
+        // Computed once per position and reused by every layer and every later request.
         float[] RopeTable(int pos)
         {
+            float[] cached = _rope[pos];
+            if (cached != null) return cached;
             int n = C.RopeDims;
             float[] cs = new float[n];
             double thetaScale = Math.Pow(C.RopeBase, -2.0 / n);
@@ -190,6 +199,7 @@ namespace Windlass
                 cs[2 * i + 1] = (float)Math.Sin(t);
                 theta *= thetaScale;
             }
+            _rope[pos] = cs;
             return cs;
         }
 
@@ -268,7 +278,7 @@ namespace Windlass
             int tiles = (rows + RowTile - 1) / RowTile;
             if (T == 1 && Quants.CanDot(type))
             {
-                Parallel.For(0, tiles, delegate(int tile)
+                Parallel.For(0, tiles, Par, delegate(int tile)
                 {
                     int r0 = tile * RowTile, r1 = Math.Min(rows, r0 + RowTile);
                     fixed (float* xp = x) fixed (float* yp = y)
@@ -276,7 +286,7 @@ namespace Windlass
                 });
                 return;
             }
-            Parallel.For(0, tiles, () => new float[(long)RowTile * cols], delegate(int tile, ParallelLoopState st, float[] scratch)
+            Parallel.For(0, tiles, Par, () => new float[(long)RowTile * cols], delegate(int tile, ParallelLoopState st, float[] scratch)
             {
                 int r0 = tile * RowTile, r1 = Math.Min(rows, r0 + RowTile);
                 fixed (float* sp = scratch) fixed (float* xp = x) fixed (float* yp = y)

@@ -6,12 +6,39 @@
 Launch-Windlass.bat serve --model D:\models\model.gguf                 :: the API on http://127.0.0.1:8777/v1
 Launch-Windlass.bat info  --model D:\models\model.gguf                 :: shape, file sizes, RAM per layer, KV cache per token
 Launch-Windlass.bat run   --model D:\models\model.gguf --prompt "Hi"   :: one reply in the console, no server
+Launch-Windlass.bat playbook probe --model D:\models\model.gguf        :: measure this computer, write its playbook
+Launch-Windlass.bat playbook show  --model D:\models\model.gguf        :: the settings serve and run would use now, and why
+Launch-Windlass.bat commands --json                                    :: every command, for scripts and agents
 Launch-Windlass.bat check                                              :: locality checks and compile only
 Launch-Windlass.bat help                                               :: every option
 ```
 
 For a split model (`name-00001-of-00004.gguf`), give any one part. While the model loads, chat requests get
 `503 model_loading`. Stop the server with **Ctrl+C** or `src\Stop-Windlass.ps1`.
+
+## The machine playbook
+
+Windlass sets itself up for the computer it runs on, whether that is a laptop on battery, a workstation or a server.
+Each time `serve` or `run` starts, it reads what the computer has (free RAM right now, total RAM, CPU cores, whether
+it runs on battery, graphics) and what the model needs (layer sizes, KV cache per token), and picks:
+
+| Setting | Rule |
+| --- | --- |
+| RAM budget | Free RAM minus a reserve for Windows and other programs (15% of total, at least 4 GB) |
+| Context | The model's, at most 8192, halved until its KV cache fits in a quarter of the budget (at least 2048) |
+| Prefetch | On when two layer slots fit beside the KV cache, so reading the next layer overlaps computing this one |
+| Pinned layers | The rest of the budget keeps layers in RAM, read once instead of for every token; the whole model when it fits |
+| Threads | One per physical core on battery; otherwise the faster of physical and logical cores as measured, or all logical cores |
+
+`playbook probe` adds measurements: how fast this computer reads layers, and how long one layer's math takes on its
+physical and on its logical cores. With them the playbook picks the thread count and predicts seconds per token, and
+names the limit (the disk or the CPU). Playbooks are saved in `playbooks\<model>.json` and reused while the computer
+and the model file stay the same; free RAM is checked again at every start. Every choice is logged with its reason,
+`playbook show` prints them without starting anything, and any option you give yourself wins.
+
+`--json` on `playbook probe`, `playbook show` and `commands` prints a versioned JSON document (`windlass.playbook/1`,
+`windlass.commands/1`), and `--out <file>` writes it as UTF-8 without a BOM, so scripts and agents can use them
+(see the Fleet CLI parity proposal). Exit code 0 is success, 1 an error, 2 a usage error.
 
 ## Options
 
@@ -21,9 +48,11 @@ For a split model (`name-00001-of-00004.gguf`), give any one part. While the mod
 | `--model-id` | file name | The id published in `/v1/models`. |
 | `--port` | 8777-8779 | A fixed port instead of the first free one in the block. |
 | `--api-key` | `$env:WINDLASS_API_KEY` | Require `Authorization: Bearer <key>` (or `X-Api-Key`) on `/v1`. |
-| `--context-length` | model's, at most 8192 | Context to allow. The KV cache grows with use, up to this. |
-| `--cache-gb` | `0` | Keep the first layers that fit in this many GB resident, so they are read from disk once. |
+| `--context-length` | playbook (model's, at most 8192) | Context to allow. The KV cache grows with use, up to this. |
+| `--cache-gb` | playbook (`0` with `--no-playbook`) | Keep the first layers that fit in this many GB resident, so they are read from disk once. |
 | `--no-prefetch` | off | Do not read the next layer while the current one computes (saves one layer of RAM). |
+| `--threads` | playbook | Worker threads for the math. |
+| `--no-playbook` | off | Ignore the playbook: the defaults below plus the options you give. |
 | `--chat-template` | detected | `llama3`, `chatml`, `mistral`, `mistral-v7` or `llama2`. |
 | `--max-tokens` | `1024` | `max_tokens` for requests that give none. |
 | `--max-queue` | `8` | Requests that may wait behind the running one; more get `503 server_busy`. |
