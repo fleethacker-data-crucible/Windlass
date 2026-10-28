@@ -16,7 +16,7 @@ if ($PSVersionTable.PSVersion.Major -ne 5) {
 
 # Started from PowerShell 7, powershell.exe inherits 7's module paths and then loads 7's copy of
 # Microsoft.PowerShell.Utility, which fails (Import-PowerShellDataFile "is not recognized"). Keep 5.1's paths only.
-$env:PSModulePath = (@($env:PSModulePath -split ';' | Where-Object { $_ -and $_ -notmatch '\\(Documents|Program Files)\\PowerShell\\' }) + (Join-Path $PSHOME 'Modules') | Select-Object -Unique) -join ';'
+$env:PSModulePath = (@($env:PSModulePath -split ';' | Where-Object { $_ -and $_ -notmatch '\\(Documents|Program Files)\\PowerShell\\|\\WindowsApps\\Microsoft\.PowerShell_' }) + (Join-Path $PSHOME 'Modules') | Select-Object -Unique) -join ';'
 
 # Temp files (Add-Type scratch) stay inside the tool folder.
 $env:TEMP = Join-Path $root 'temp\sys'; $env:TMP = $env:TEMP

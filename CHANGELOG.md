@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Stress-test report for Llama 3.3 70B (`docs/STRESS-TEST.md`, charts in `docs/stress-test/`): phases 1–6 pass; the soak and kill-and-restart phases are still to run.
+- `Launch-Windlass.bat` clears `PSModulePath`, and `Start-Windlass.ps1` also filters the Microsoft Store PowerShell 7 module path, so starting from PowerShell 7 works every time.
 - `Windlass.bat` is now `Launch-Windlass.bat`, the Fleet launcher name.
 - Starting Windlass from PowerShell 7 works: `Start-Windlass.ps1` drops PowerShell 7's module paths, which made `serve` fail with "Import-PowerShellDataFile is not recognized".
 - Brand: placeholder emblem (light and dark), `mark.svg`, `mark-256.png` and `favicon.ico`, rendered by `build\New-WindlassBrand.ps1`.
