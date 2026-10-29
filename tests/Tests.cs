@@ -517,7 +517,7 @@ namespace Windlass.Tests
         {
             MachineFacts m = MachineFacts.FromJson("{\"cpu\":\" AMD Ryzen 9 9950X3D \",\"physicalCores\":16,\"totalRam\":100000000000,\"hasBattery\":true,\"onBattery\":true,\"gpus\":[\"Radeon\",\"iGPU\"]}");
             Equal("AMD Ryzen 9 9950X3D", m.Cpu, "cpu trimmed");
-            Equal(16, Math.Min(m.PhysicalCores, 16), "physical cores (capped by this machine's logical cores)");
+            Equal(Math.Min(16, Math.Max(1, Environment.ProcessorCount)), m.PhysicalCores, "physical cores (capped by this machine's logical cores)");
             Equal(100000000000L, m.TotalRam, "total RAM");
             Check(m.HasBattery && m.OnBattery, "battery flags");
             Equal(2, m.Gpus.Count, "gpus list");
