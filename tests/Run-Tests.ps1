@@ -18,4 +18,24 @@ foreach ($r in @('System.dll', 'System.Core.dll')) { [void]$cp.ReferencedAssembl
 $paths = @(Get-ChildItem -LiteralPath (Join-Path $root 'src'), $PSScriptRoot -Filter *.cs -File | ForEach-Object { $_.FullName })
 Add-Type -Path $paths -CompilerParameters $cp
 $f = if ($Filter) { $Filter } else { $null }
-exit ([Windlass.Tests.Runner]::Run($root, $f))
+# Different runner services can share this Windows machine. The API fixtures use
+# one reserved port, so coordinate across checkouts and Windows sessions.
+$mutex = New-Object System.Threading.Mutex -ArgumentList @($false, 'Global\Windlass.Tests.Loopback18777')
+$owned = $false
+try {
+    try {
+        $owned = $mutex.WaitOne(0)
+        if (-not $owned) {
+            Write-Host 'Waiting for another Windlass test run to release loopback port 18777.'
+            $owned = $mutex.WaitOne([TimeSpan]::FromMinutes(5))
+        }
+    } catch [System.Threading.AbandonedMutexException] {
+        $owned = $true
+    }
+    if (-not $owned) { throw 'Timed out waiting for the Windlass API test port.' }
+    $failures = [Windlass.Tests.Runner]::Run($root, $f)
+} finally {
+    if ($owned) { $mutex.ReleaseMutex() }
+    $mutex.Dispose()
+}
+exit $failures

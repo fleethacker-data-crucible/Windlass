@@ -47,6 +47,7 @@ namespace Windlass.Tests
                 Add(tests, "engine: stop sequences, max_tokens and context limit", GenerationLimits);
                 Add(tests, "engine: guess-ahead keeps the same greedy reply and keeps right guesses", GuessAheadIsExact);
                 Add(tests, "engine: real runs are recorded in the playbook", RunsAreRecorded);
+                Add(tests, "quality: perplexity is right on known logits, repeatable, and recorded by playbook eval", QualityScore);
                 Add(tests, "engine: unsupported models are refused clearly", RefusesUnsupported);
                 Add(tests, "tokenizer: ids match llama.cpp (Llama 3 BPE, Qwen2 BPE, SentencePiece)", TokenizerMatchesLlamaCpp);
                 Add(tests, "tokenizer: byte-level BPE decodes back to the text", TokenizerRoundTrip);
@@ -340,6 +341,37 @@ namespace Windlass.Tests
             Equal(2L, p.ObsRuns, "two replies observed");
             Check(p.ObsTokens >= 10 && p.ObsSeconds > 0 && p.ObsPromptTokens > 0, "tokens and time recorded");
             Check(File.Exists(path) && File.ReadAllText(path).Contains("\"observed\""), "saved to the playbook file");
+        }
+
+        static void QualityScore()
+        {
+            // Uniform logits over 4 tokens: every prediction has probability 1/4, so perplexity is exactly 4.
+            Check(Math.Abs(Quality.Perplexity(new float[8], new int[] { 0, 3 }) - 4.0) < 1e-9, "uniform over 4 gives perplexity 4");
+            // A confident right prediction scores near 1.
+            Check(Quality.Perplexity(new float[] { 0, 20, 0, 0, 0, 0, 0, 0 }, new int[] { 0, 1 }) < 1.01, "a sure, right guess scores near 1");
+
+            TinySpec s = new TinySpec { Arch = "llama", Type = GgmlType.Q8_0 };
+            LayeredBackend b = LoadBackend(s);
+            QualityResult a = b.Evaluate(32, CancellationToken.None), again = b.Evaluate(32, CancellationToken.None);
+            GenerationResult res;
+            string after = Generate(b, Req(4, "user", "hello"), out res);
+            b.Dispose();
+            Check(a.Tokens == 32 && a.Perplexity > 1 && !double.IsNaN(a.Perplexity) && !double.IsInfinity(a.Perplexity), "a finite score above 1: " + a.Perplexity);
+            Check(Math.Abs(a.Perplexity - again.Perplexity) < 1e-9, "the same score twice");
+            Equal(4, res.CompletionTokens, "generation still works after an eval");
+
+            string model = Model(s);
+            TextWriter old = Console.Out;
+            StringWriter sw = new StringWriter();
+            int rc;
+            try { Console.SetOut(sw); rc = Program.Run(new string[] { "playbook", "eval", "--model", model, "--tokens", "32", "--json" }, _temp, null, "0"); }
+            finally { Console.SetOut(old); }
+            Equal(0, rc, "playbook eval exit code");
+            Dictionary<string, object> q = Json.Parse(sw.ToString().Trim()) as Dictionary<string, object>;
+            Equal("windlass.quality/1", Json.GetStr(q, "schema", ""), "quality schema");
+            Check(Math.Abs(Json.GetNum(q, "perplexity", 0) - a.Perplexity) < 1e-6, "the CLI gives the same score");
+            string saved = File.ReadAllText(Playbook.PathFor(_temp, LayeredBackend.DefaultId(model)));
+            Check(saved.Contains("\"perplexity\"") && saved.Contains("Quality: perplexity"), "the score and its rule are in the playbook");
         }
 
         static string Generate(Backend b, GenerationRequest r, out GenerationResult res)

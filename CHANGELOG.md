@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- `playbook eval`: quality score (perplexity on a built-in passage written for the test (so no model has memorised it)) and prompt seconds per token, kept in the playbook; `docs/SPEED-QUALITY.md` sets out free vs costly speed-ups and the planned speed/quality dial.
 - Guess-ahead (prompt-lookup speculation) for greedy replies: up to 8 guesses from text already in the conversation, checked in one pass; the reply is unchanged. The playbook turns it on or off from a measured batch cost and from how many guesses real runs kept (`--guess` / `--no-guess` override).
 - The playbook learns from real runs (tokens, seconds, guesses kept), reports them in `playbook show` and uses them at the next start.
 - The KV cache is fp16 (llama.cpp's default), half the memory: 0.33 MB per token for Llama 3.3 70B, so the playbook can pin more of the model.
