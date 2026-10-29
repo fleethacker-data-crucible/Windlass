@@ -258,7 +258,7 @@ function Get-FleetHttpSysRequestQueueText {
     HTTP://LOCALHOST:8845/                  host:port
     HTTP://127.0.0.1:25000:127.0.0.1/       host:port:ip (IP-bound prefix; TalkForge registers this form)
     HTTP://[::1]:8845/                      bracketed IPv6 host
-    HTTP://*:5357/<path>/, HTTP://+:80/     wildcards
+    Wildcard hosts (* or +), e.g. ports 5357 and 80; never loopback.
   Returns @{ Scheme; Host; Port; BoundIp; Path; Loopback }. Loopback is true only when the host is localhost,
   127.0.0.1 or [::1] AND, for the host:port:ip form, the bound ip is 127.0.0.1 or ::1 too. + and * are never loopback.
 #>

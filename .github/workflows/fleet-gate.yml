@@ -1,0 +1,12 @@
+# fleet-gate: the org-wide PR check (see STANDARDS.md in fleethacker-comms-data-crucible).
+# The reusable workflow is pinned to a comms main commit; bump the SHA to adopt gate updates.
+name: fleet-gate
+on:
+  pull_request:
+    branches: [main, 'feature/**']
+  merge_group:
+permissions:
+  contents: read
+jobs:
+  fleet-gate:
+    uses: fleethacker-data-crucible/fleethacker-comms-data-crucible/.github/workflows/fleet-gate.yml@2b2a4ade8fac3fd5a3b2d740ec0d5ce39891c3e9

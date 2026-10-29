@@ -1,0 +1,397 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Windlass engine briefing. Self-contained: no web fonts, scripts or network requests. Screenshots: windlass-briefing-light.png / -dark.png. -->
+<title>Windlass Engine Briefing</title>
+<style>
+/* Layout: a single chart-room column; each section is one idea, with a drawing or a table that carries it. Fleet Unified UI tokens, brass as the Fleet-level accent. */
+:root {
+  --bg: #fbfaf2; --surface: #ffffff; --muted: #efe9d9; --border: #dcd3bd; --border-strong: #c4b79a;
+  --fg: #132633; --fg-muted: #4f5d66; --brass: #8a6b45; --brass-soft: #e8dcc3; --navy: #0d2233;
+  --ok: #3f7a1f; --warn: #9a5f00; --bar-math: #1f5f8b; --bar-copy: #b98a4e;
+  --display: Cambria, Georgia, serif;
+  --body: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+  --mono: "Cascadia Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #071a26; --surface: #0d2636; --muted: #183a52; --border: #24465e; --border-strong: #34597a;
+  --fg: #f4ead6; --fg-muted: #a9b4ba; --brass: #d9b77a; --brass-soft: #2a3d48; --navy: #0d2233;
+  --ok: #a3d65c; --warn: #e2b04a; --bar-math: #7cc4f0; --bar-copy: #d9b77a; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #071a26; --surface: #0d2636; --muted: #183a52; --border: #24465e; --border-strong: #34597a;
+  --fg: #f4ead6; --fg-muted: #a9b4ba; --brass: #d9b77a; --brass-soft: #2a3d48; --navy: #0d2233;
+  --ok: #a3d65c; --warn: #e2b04a; --bar-math: #7cc4f0; --bar-copy: #d9b77a; color-scheme: dark }
+
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--fg); font-family: var(--body); font-size: 15px; line-height: 1.55; }
+.page { max-width: 980px; margin: 0 auto; padding-block: 40px 64px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: grid; gap: 56px; }
+h1, h2 { font-family: var(--display); font-weight: 700; text-wrap: balance; margin: 0; }
+h1 { font-size: clamp(30px, 5vw, 46px); line-height: 1.1; }
+h2 { font-size: clamp(22px, 3.2vw, 28px); line-height: 1.2; }
+p { margin: 0; max-width: 68ch; }
+.eyebrow { font-size: 12px; letter-spacing: .12em; text-transform: uppercase; color: var(--brass); font-weight: 600; }
+.lede { font-size: 17px; color: var(--fg-muted); }
+section { display: grid; gap: 18px; min-width: 0; }
+.mono { font-family: var(--mono); font-size: 13px; }
+.num { font-variant-numeric: tabular-nums; }
+
+header.hero { display: grid; gap: 22px; }
+.brand { display: flex; align-items: center; gap: 14px; }
+.brand svg { width: 52px; height: 52px; flex: none; }
+.brand .word { font-family: var(--display); letter-spacing: .22em; font-size: 15px; }
+.facts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0; border-top: 2px solid var(--brass); border-bottom: 1px solid var(--border); }
+.fact { padding: 14px 16px 16px 0; display: grid; gap: 2px; min-width: 0; }
+.fact + .fact { padding-left: 16px; border-left: 1px solid var(--border); }
+.fact b { font-family: var(--display); font-size: 30px; font-weight: 700; line-height: 1.1; }
+.fact span { font-size: 13px; color: var(--fg-muted); }
+
+figure { margin: 0; display: grid; gap: 10px; min-width: 0; }
+figcaption { font-size: 13px; color: var(--fg-muted); max-width: 72ch; }
+.drawing { overflow-x: auto; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+.drawing svg { display: block; width: 100%; min-width: 620px; height: auto; }
+svg text { font-family: var(--body); }
+.t-fg { fill: var(--fg); } .t-mute { fill: var(--fg-muted); } .t-brass { fill: var(--brass); }
+
+.split { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 28px; align-items: start; }
+.table-wrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { text-align: left; padding: 9px 12px 9px 0; border-bottom: 1px solid var(--border); vertical-align: top; }
+th { font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--fg-muted); font-weight: 600; }
+td.r, th.r { text-align: right; }
+.pill { display: inline-block; font-size: 12px; font-weight: 700; padding: 1px 8px; border-radius: 99px; border: 1px solid currentColor; white-space: nowrap; }
+.pill.ok { color: var(--ok); } .pill.warn { color: var(--warn); } .pill.wait { color: var(--fg-muted); }
+
+.machines { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+.machine { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px; display: grid; gap: 10px; align-content: start; min-width: 0; }
+.machine h3 { font-family: var(--display); font-size: 17px; margin: 0; }
+.machine .spec { font-size: 12.5px; color: var(--fg-muted); }
+.machine dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; font-size: 13.5px; }
+.machine dt { color: var(--fg-muted); }
+.machine dd { margin: 0; font-variant-numeric: tabular-nums; text-align: right; }
+.pinbar { height: 8px; border-radius: 4px; background: var(--muted); overflow: hidden; }
+.pinbar i { display: block; height: 100%; background: var(--brass); }
+.note { font-size: 13px; color: var(--fg-muted); border-left: 2px solid var(--brass); padding-left: 12px; max-width: 72ch; }
+
+pre { margin: 0; overflow-x: auto; background: var(--navy); color: #e8dcc2; border-radius: 10px; padding: 14px 16px; font-family: var(--mono); font-size: 12.5px; line-height: 1.55; }
+pre .k { color: #d9b77a; } pre .c { color: #8fa1ad; } pre .g { color: #a3d65c; }
+
+ol.next { margin: 0; padding-left: 20px; display: grid; gap: 8px; max-width: 72ch; }
+footer { font-size: 12.5px; color: var(--fg-muted); border-top: 1px solid var(--border); padding-top: 16px; display: grid; gap: 4px; }
+a { color: var(--brass); }
+
+@media (max-width: 760px) {
+  .facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .fact:nth-child(3) { padding-left: 0; border-left: 0; }
+  .split { grid-template-columns: minmax(0, 1fr); }
+  .machines { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 460px) { .machines { grid-template-columns: minmax(0, 1fr); } }
+</style>
+</head>
+<body>
+
+<div class="page">
+
+<header class="hero">
+  <div class="brand">
+    <svg viewBox="0 0 64 64" role="img" aria-label="Windlass mark">
+      <circle cx="32" cy="32" r="29.5" fill="#0d2233" stroke="#c9a66b" stroke-width="3"/>
+      <rect x="13" y="40" width="38" height="5" rx="1.5" fill="#c9a66b"/>
+      <path d="M16 40 L19 22 L24 22 L25 40 Z" fill="#c9a66b"/>
+      <path d="M48 40 L45 22 L40 22 L39 40 Z" fill="#c9a66b"/>
+      <rect x="23" y="22" width="18" height="13" rx="3" fill="#f1e4c8"/>
+      <path d="M41 35 L52 49" stroke="#d9b77a" stroke-width="3.5" stroke-linecap="round" stroke-dasharray="3.5 2.5" fill="none"/>
+    </svg>
+    <span class="word">WINDLASS</span>
+  </div>
+  <div class="eyebrow">Engine briefing · FleetHacker Edge-Ops · 28 October 2026</div>
+  <h1>A 70-billion-parameter model on an ordinary Windows PC, and an engine that tunes itself to the machine it lands on</h1>
+  <p class="lede">Windlass runs local models too big for the GPU or even for RAM by hauling them through memory one layer at a time, like a windlass hauls an anchor chain in link by link. It is plain C# on Windows PowerShell 5.1: no installs, no admin rights, no network, loopback only. This page covers what it does, what an overnight stress test showed, and the new machine playbook.</p>
+  <div class="facts">
+    <div class="fact"><b class="num">42.5 GB</b><span>Llama 3.3 70B model file, run on a PC whose GPU has 24 GB</span></div>
+    <div class="fact"><b class="num">~1.7 GB</b><span>of weights in RAM at a time while streaming (two layers)</span></div>
+    <div class="fact"><b class="num">12 / 12</b><span>facts recalled correctly in a conversation that grew to 6,576 tokens</span></div>
+    <div class="fact"><b class="num">0</b><span>heat slowdowns: the CPU held 4.3 GHz in every sample overnight</span></div>
+  </div>
+</header>
+
+<section>
+  <div class="eyebrow">How it works</div>
+  <h2>The model never has to fit. Only two layers do.</h2>
+  <figure>
+    <div class="drawing">
+      <svg viewBox="0 0 900 250" role="img" aria-label="Diagram: the model file on disk feeds two RAM slots; while the CPU computes layer N in one slot, layer N+1 is read into the other; the KV cache keeps the conversation; pinned layers stay resident when RAM allows">
+        <defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 Z" style="fill:var(--brass)"/></marker></defs>
+        <!-- disk -->
+        <rect x="10" y="40" width="190" height="170" rx="10" style="fill:var(--muted);stroke:var(--border-strong)"/>
+        <text x="105" y="66" text-anchor="middle" class="t-fg" font-size="15" font-weight="700">Model file (GGUF)</text>
+        <text x="105" y="86" text-anchor="middle" class="t-mute" font-size="12">80 layers × 0.54 GB</text>
+        <g style="fill:var(--surface);stroke:var(--border-strong)">
+          <rect x="30" y="100" width="150" height="16" rx="3"/><rect x="30" y="122" width="150" height="16" rx="3"/>
+          <rect x="30" y="144" width="150" height="16" rx="3"/><rect x="30" y="166" width="150" height="16" rx="3"/>
+        </g>
+        <text x="105" y="200" text-anchor="middle" class="t-mute" font-size="11">read, never loaded whole</text>
+        <!-- slots -->
+        <rect x="290" y="40" width="200" height="74" rx="10" style="fill:var(--surface);stroke:var(--brass);stroke-width:2"/>
+        <text x="390" y="68" text-anchor="middle" class="t-fg" font-size="14" font-weight="700">Slot A · layer N</text>
+        <text x="390" y="90" text-anchor="middle" class="t-mute" font-size="12">being computed</text>
+        <rect x="290" y="136" width="200" height="74" rx="10" style="fill:var(--surface);stroke:var(--border-strong);stroke-dasharray:5 4"/>
+        <text x="390" y="164" text-anchor="middle" class="t-fg" font-size="14" font-weight="700">Slot B · layer N+1</text>
+        <text x="390" y="186" text-anchor="middle" class="t-mute" font-size="12">prefetched meanwhile</text>
+        <path d="M200 110 C240 100 250 80 288 77" fill="none" style="stroke:var(--brass)" stroke-width="2" marker-end="url(#ar)"/>
+        <path d="M200 150 C240 160 250 172 288 173" fill="none" style="stroke:var(--brass)" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#ar)"/>
+        <!-- cpu -->
+        <rect x="580" y="40" width="140" height="170" rx="10" style="fill:var(--navy)"/>
+        <text x="650" y="104" text-anchor="middle" font-size="15" font-weight="700" fill="#f4ead6">CPU</text>
+        <text x="650" y="126" text-anchor="middle" font-size="12" fill="#a9b4ba">32 threads</text>
+        <text x="650" y="144" text-anchor="middle" font-size="12" fill="#a9b4ba">0.029 s / layer</text>
+        <path d="M490 77 C530 77 545 100 578 110" fill="none" style="stroke:var(--brass)" stroke-width="2" marker-end="url(#ar)"/>
+        <!-- kv cache -->
+        <rect x="770" y="40" width="120" height="74" rx="10" style="fill:var(--surface);stroke:var(--border-strong)"/>
+        <text x="830" y="68" text-anchor="middle" class="t-fg" font-size="13" font-weight="700">KV cache</text>
+        <text x="830" y="88" text-anchor="middle" class="t-mute" font-size="11">the conversation,</text>
+        <text x="830" y="102" text-anchor="middle" class="t-mute" font-size="11">fp16, 0.33 MB/token</text>
+        <path d="M720 90 L768 80" fill="none" style="stroke:var(--brass)" stroke-width="2" marker-end="url(#ar)"/>
+        <rect x="770" y="136" width="120" height="74" rx="10" style="fill:var(--brass-soft);stroke:var(--brass)"/>
+        <text x="830" y="164" text-anchor="middle" class="t-fg" font-size="13" font-weight="700">Pinned layers</text>
+        <text x="830" y="184" text-anchor="middle" class="t-mute" font-size="11">kept in RAM when</text>
+        <text x="830" y="198" text-anchor="middle" class="t-mute" font-size="11">the machine has room</text>
+        <path d="M768 168 L722 160" fill="none" style="stroke:var(--brass)" stroke-width="2" marker-end="url(#ar)"/>
+        <text x="450" y="238" text-anchor="middle" class="t-mute" font-size="12">One token = one pass through all 80 layers. Earlier turns of a chat stay in the KV cache, so only new text is processed.</text>
+      </svg>
+    </div>
+    <figcaption>Layer streaming follows AirLLM's idea; the engine, tokenizer and chat templates are original C# checked against llama.cpp's outputs. Windlass serves an OpenAI-compatible API and sits behind Fairlead as the <span class="mono">deep-local</span> route, for jobs that need a big model and can wait.</figcaption>
+  </figure>
+</section>
+
+<section>
+  <div class="eyebrow">Overnight stress test · 27–28 October</div>
+  <h2>Harder at every phase, and Windlass held</h2>
+  <div class="split">
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Phase</th><th>Result on Windlass</th><th></th></tr></thead>
+        <tbody>
+          <tr><td>1 · Error handling</td><td>Right codes: 404 unknown model, 400 prompt too long</td><td><span class="pill warn">PASS*</span></td></tr>
+          <tr><td>2 · Cancel mid-answer</td><td>Turn freed 22 s after the client hung up</td><td><span class="pill ok">PASS</span></td></tr>
+          <tr><td>3 · Full queue</td><td>8 waiting; the next gets 503 server_busy</td><td><span class="pill warn">PASS*</span></td></tr>
+          <tr><td>4 · Long answer</td><td class="num">300 tokens, steady 8.4 s per token</td><td><span class="pill ok">PASS</span></td></tr>
+          <tr><td>5 · Long prompt</td><td class="num">2,927 tokens read, correct answer at 60 min</td><td><span class="pill warn">PASS*</span></td></tr>
+          <tr><td>6 · Long conversation</td><td class="num">12 of 12 recalls, context up to 6,576 tokens</td><td><span class="pill ok">PASS</span></td></tr>
+          <tr><td>7 · One-hour soak</td><td>Paused; runs tonight</td><td><span class="pill wait">PENDING</span></td></tr>
+          <tr><td>8 · Kill and restart</td><td>Runs after the soak</td><td><span class="pill wait">PENDING</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div style="display:grid; gap:14px; min-width:0">
+      <p class="note"><b>PASS*</b> means Windlass did the right thing, but the same request sent through Fairlead came back wrong: a 503 instead of a 400, a 502 instead of a 503, and a 2,927-token prompt cut off at Fairlead's 60-minute limit. Those are Fairlead fixes; the cards turn green when the phases are rerun.</p>
+      <p class="note">The long conversation is the strongest result: each turn added about 550 tokens of ship's log and asked about an earlier day. The wait for the first word stayed between 10 and 12 minutes as the conversation grew twelvefold, because only the new text is processed.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="eyebrow">The finding</div>
+  <h2>Most of each token was spent moving the model, not thinking</h2>
+  <figure>
+    <div class="drawing">
+      <svg viewBox="0 0 900 190" role="img" aria-label="Bar chart: streaming measured 8.7 seconds per token, of which 2.4 seconds is the math and about 6.3 seconds is moving the model through RAM; with the whole model pinned the playbook predicts 2.4 seconds per token">
+        <g class="t-mute" font-size="11">
+          <line x1="190" y1="22" x2="190" y2="150" style="stroke:var(--border)"/><text x="190" y="168" text-anchor="middle">0 s</text>
+          <line x1="345" y1="22" x2="345" y2="150" style="stroke:var(--border)"/><text x="345" y="168" text-anchor="middle">2 s</text>
+          <line x1="500" y1="22" x2="500" y2="150" style="stroke:var(--border)"/><text x="500" y="168" text-anchor="middle">4 s</text>
+          <line x1="655" y1="22" x2="655" y2="150" style="stroke:var(--border)"/><text x="655" y="168" text-anchor="middle">6 s</text>
+          <line x1="810" y1="22" x2="810" y2="150" style="stroke:var(--border)"/><text x="810" y="168" text-anchor="middle">8 s</text>
+        </g>
+        <text x="180" y="54" text-anchor="end" class="t-fg" font-size="13" font-weight="700">Streaming</text>
+        <text x="180" y="70" text-anchor="end" class="t-mute" font-size="11">measured</text>
+        <rect x="190" y="36" width="186" height="38" style="fill:var(--bar-math)"/>
+        <rect x="376" y="36" width="488" height="38" style="fill:var(--bar-copy)"/>
+        <text x="283" y="60" text-anchor="middle" font-size="12" font-weight="700" fill="#071a26">math 2.4 s</text>
+        <text x="620" y="60" text-anchor="middle" font-size="12" font-weight="700" fill="#071a26">moving the model through RAM ≈ 6.3 s</text>
+        <text x="870" y="60" class="t-fg num" font-size="13" font-weight="700">8.7</text>
+        <text x="180" y="114" text-anchor="end" class="t-fg" font-size="13" font-weight="700">Pinned</text>
+        <text x="180" y="130" text-anchor="end" class="t-mute" font-size="11">probe's estimate</text>
+        <rect x="190" y="96" width="186" height="38" style="fill:var(--bar-math);fill-opacity:.55;stroke:var(--bar-math);stroke-dasharray:5 4"/>
+        <text x="386" y="120" class="t-fg num" font-size="13" font-weight="700">2.4 s per token</text>
+      </svg>
+    </div>
+    <figcaption>Seconds per token for Llama 3.3 70B on the Ryzen 9 9950X3D. The 8.7 s total is measured (stress test). The 2.4 s of math is measured too: <span class="mono">playbook probe</span> timed one layer at 0.029 s, times 80 layers. The rest is the cost of copying each layer from the file cache into a working slot for every token. On a machine with room, the playbook keeps the whole model in RAM, which removes that copy.</figcaption>
+  </figure>
+  <figure>
+    <div class="drawing">
+      <svg viewBox="0 0 900 170" role="img" aria-label="Measured: the same question and the same 40-word answer took 312.7 seconds before and 128.5 seconds after, plus 11.9 seconds to load; 2.4 times faster">
+        <g class="t-mute" font-size="11">
+          <line x1="190" y1="16" x2="190" y2="126" style="stroke:var(--border)"/><text x="190" y="144" text-anchor="middle">0 s</text>
+          <line x1="350" y1="16" x2="350" y2="126" style="stroke:var(--border)"/><text x="350" y="144" text-anchor="middle">80 s</text>
+          <line x1="510" y1="16" x2="510" y2="126" style="stroke:var(--border)"/><text x="510" y="144" text-anchor="middle">160 s</text>
+          <line x1="670" y1="16" x2="670" y2="126" style="stroke:var(--border)"/><text x="670" y="144" text-anchor="middle">240 s</text>
+          <line x1="830" y1="16" x2="830" y2="126" style="stroke:var(--border)"/><text x="830" y="144" text-anchor="middle">320 s</text>
+        </g>
+        <text x="180" y="44" text-anchor="end" class="t-fg" font-size="13" font-weight="700">Before</text>
+        <text x="180" y="60" text-anchor="end" class="t-mute" font-size="11">streaming</text>
+        <rect x="190" y="28" width="625" height="36" style="fill:var(--bar-copy)"/>
+        <text x="805" y="51" text-anchor="end" font-size="12" font-weight="700" fill="#071a26">312.7 s · 1,677 GB moved</text>
+        <text x="180" y="98" text-anchor="end" class="t-fg" font-size="13" font-weight="700">After</text>
+        <text x="180" y="114" text-anchor="end" class="t-mute" font-size="11">playbook</text>
+        <rect x="190" y="82" width="257" height="36" style="fill:var(--bar-math)"/>
+        <rect x="447" y="82" width="24" height="36" style="fill:var(--bar-math);fill-opacity:.35"/>
+        <text x="482" y="105" class="t-fg num" font-size="13" font-weight="700">128.5 s (+11.9 s load) · 41.9 GB · 2.4× faster</text>
+        <text x="450" y="164" text-anchor="middle" class="t-mute" font-size="11">Same question, same 40-word answer, word for word. Measured 28 October, one run each.</text>
+      </svg>
+    </div>
+    <figcaption><b>Measured, not predicted.</b> The same request, "In one sentence, what is a ship's windlass?", capped at 40 words, ran once on the current release and once with the playbook. The answer was identical. Reading the prompt did not speed up (about 1.3 s per prompt word either way), so short prompts gain the most; a faster prompt path is the next engine fix.</figcaption>
+  </figure>
+</section>
+
+<section>
+  <div class="eyebrow">New · the machine playbook</div>
+  <h2>Windlass reads the computer and writes its own settings</h2>
+  <p>Each start, Windlass looks at what the computer has (free RAM now, total RAM, cores, battery, graphics) and what the model needs (layer sizes, conversation memory per token). It then picks the context length, whether to prefetch, how much of the model to keep in RAM and how many threads to use, and logs a plain-English reason for each choice. <span class="mono">playbook probe</span> adds measurements, so it can pick threads by test and predict speed. Any setting given by hand still wins.</p>
+  <div class="machines">
+    <div class="machine">
+      <h3>This desktop</h3>
+      <div class="spec">100 GB RAM, 68 GB free · 16 cores / 32 threads · mains</div>
+      <div class="pinbar" title="100% pinned"><i style="width:100%"></i></div>
+      <dl><dt>Pinned</dt><dd>41.9 GB · all</dd><dt>Context</dt><dd>8,192</dd><dt>Prefetch</dt><dd>on</dd><dt>Threads</dt><dd>32 (measured)</dd><dt>Guess-ahead</dt><dd>off (measured)</dd><dt>Limit</dt><dd>CPU</dd></dl>
+    </div>
+    <div class="machine">
+      <h3>32 GB laptop</h3>
+      <div class="spec">20 GB free · 8 cores / 16 threads · on battery</div>
+      <div class="pinbar" title="about 25% pinned"><i style="width:25%"></i></div>
+      <dl><dt>Pinned</dt><dd>10.8 GB · 25%</dd><dt>Context</dt><dd>8,192</dd><dt>Prefetch</dt><dd>on</dd><dt>Threads</dt><dd>8 (battery)</dd><dt>Guess-ahead</dt><dd>on</dd><dt>Limit</dt><dd>disk (expected)</dd></dl>
+    </div>
+    <div class="machine">
+      <h3>16 GB laptop</h3>
+      <div class="spec">10 GB free · 8 cores / 16 threads · on battery</div>
+      <div class="pinbar" title="about 7% pinned"><i style="width:7%"></i></div>
+      <dl><dt>Pinned</dt><dd>2.9 GB · 7%</dd><dt>Context</dt><dd>4,096</dd><dt>Prefetch</dt><dd>on</dd><dt>Threads</dt><dd>8 (battery)</dd><dt>Guess-ahead</dt><dd>on</dd><dt>Limit</dt><dd>disk (expected)</dd></dl>
+    </div>
+    <div class="machine">
+      <h3>8 GB machine</h3>
+      <div class="spec">3 GB free · 4 cores / 8 threads · mains</div>
+      <div class="pinbar" title="nothing pinned"><i style="width:0%"></i></div>
+      <dl><dt>Pinned</dt><dd>none</dd><dt>Context</dt><dd>2,048</dd><dt>Prefetch</dt><dd>off</dd><dt>Threads</dt><dd>8</dd><dt>Guess-ahead</dt><dd>on</dd><dt>Note</dt><dd>warns: low RAM</dd></dl>
+    </div>
+  </div>
+  <p class="note">Same 70B model, four computers. The desktop column is a real <span class="mono">playbook probe</span> run; the other three are what the rules choose for those specs, checked in Windlass's unit tests. A laptop that streams most of the model will be far slower than the desktop; the playbook names that limit up front instead of leaving it to guesswork.</p>
+  <pre><span class="c">&gt; Launch-Windlass.bat playbook show --model Llama-3.3-70B-Instruct-Q4_K_M.gguf</span>
+  context 8192, prefetch on, pinned 41.9 GB, 32 threads
+  - RAM: 100.5 GB total, 67.6 GB free now. Keeping 15.1 GB for Windows and other programs, so Windlass may use 52.5 GB.
+  - The whole model (41.9 GB) fits: every layer stays in RAM after loading, so a token reads nothing from disk.
+  - 32 threads: measured faster than 16 (0.029 s vs 0.035 s per layer).
+  - <span class="g">Expect about 2.4 s per token (compute 2.4 s, reading 0.0 s; the CPU is the limit).</span>
+  - Guess-ahead off: checking 8 guesses costs 7.3x a normal token on this machine, more than the guesses usually save.</pre>
+</section>
+
+<section>
+  <div class="eyebrow">New · it decides, then it learns</div>
+  <h2>Each trick switched on only where it pays, and quality measured, not assumed</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Trick</th><th>What it does</th><th>How the playbook decides</th><th>On this desktop</th></tr></thead>
+      <tbody>
+        <tr><td><b>Pinning</b></td><td>Keeps layers in RAM so a token stops re-reading them</td><td>Pins whatever RAM is left after Windows, the conversation memory and two working slots</td><td>All 41.9 GB pinned</td></tr>
+        <tr><td><b>Half-size conversation memory</b></td><td>Stores the KV cache in 16-bit, like llama.cpp: 0.33 MB per token instead of 0.66</td><td>Always on; the RAM it frees goes to pinning</td><td>2.7 GB at 8,192 tokens</td></tr>
+        <tr><td><b>Quality score</b></td><td><span class="mono">playbook eval</span> measures how well the model predicts a passage written for the test (perplexity, lower is better), so speed never gets traded for quality blind</td><td>Measured per model on each machine; the planned speed/quality dial picks among models with these numbers</td><td>70B: 17.9 · 3B: 32.3</td></tr>
+        <tr><td><b>Guess-ahead</b></td><td>For exact (temperature 0) replies, guesses the next words from text already in the chat and checks 8 at once. The reply never changes; right guesses are free words</td><td><span class="mono">probe</span> times a token plus 8 guesses. On if that costs at most 2.5× a token; off if real runs show guesses rarely come true</td><td><span class="pill wait">OFF</span> 7.3× a token here</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="note">The desktop result is the engine making a call nobody hard-coded. With the whole model in RAM, the math is the limit, and checking 8 guesses costs 7.3 normal tokens, so guessing would slow it down. On a laptop that streams the model from disk, the read dominates and a batch of guesses shares it, so the same rules turn it on. Every reply is also recorded in the playbook (tokens, seconds, guesses kept), and the next start uses those numbers. The 7.3× also points at the next engine fix: a faster batch path, which would speed up long prompts as well.</p>
+</section>
+
+<section>
+  <div class="eyebrow">Concept · not built yet</div>
+  <h2>Hive mode: twenty laptops as one model server</h2>
+  <p>A vessel may have no server for a big model, but it has a stack of ZBooks. Each one alone would stream a 70B model from its disk at many seconds per token. Together they hold the whole model in RAM: each laptop keeps a slice of the layers, and a token passes down the line from laptop to laptop. Each laptop's own playbook says how big a slice it can hold, and a coordinator splits the model by those numbers.</p>
+  <figure>
+    <div class="drawing">
+      <svg viewBox="0 0 900 230" role="img" aria-label="Concept diagram: a request enters laptop 1, which runs layers 1 to 4; the hidden state, 16 KB per token, passes over the network to laptop 2 for layers 5 to 8, and so on to laptop 20 for layers 77 to 80, which returns the next word">
+        <defs><marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 Z" style="fill:var(--brass)"/></marker></defs>
+        <text x="20" y="110" class="t-fg" font-size="13" font-weight="700">Request</text>
+        <path d="M80 106 L118 106" style="stroke:var(--brass)" stroke-width="2" marker-end="url(#ar2)"/>
+        <g font-size="12">
+          <rect x="120" y="70" width="120" height="74" rx="10" style="fill:var(--surface);stroke:var(--brass);stroke-width:2"/>
+          <text x="180" y="98" text-anchor="middle" class="t-fg" font-weight="700">Laptop 1</text>
+          <text x="180" y="118" text-anchor="middle" class="t-mute">layers 1–4</text>
+          <text x="180" y="134" text-anchor="middle" class="t-mute">2.1 GB in RAM</text>
+          <path d="M240 106 L298 106" style="stroke:var(--brass)" stroke-width="2" marker-end="url(#ar2)"/>
+          <rect x="300" y="70" width="120" height="74" rx="10" style="fill:var(--surface);stroke:var(--border-strong)"/>
+          <text x="360" y="98" text-anchor="middle" class="t-fg" font-weight="700">Laptop 2</text>
+          <text x="360" y="118" text-anchor="middle" class="t-mute">layers 5–8</text>
+          <text x="360" y="134" text-anchor="middle" class="t-mute">2.1 GB in RAM</text>
+          <path d="M420 106 L478 106" style="stroke:var(--brass)" stroke-width="2" marker-end="url(#ar2)"/>
+          <text x="530" y="112" text-anchor="middle" class="t-mute" font-size="20">· · ·</text>
+          <path d="M582 106 L638 106" style="stroke:var(--brass)" stroke-width="2" marker-end="url(#ar2)"/>
+          <rect x="640" y="70" width="120" height="74" rx="10" style="fill:var(--surface);stroke:var(--border-strong)"/>
+          <text x="700" y="98" text-anchor="middle" class="t-fg" font-weight="700">Laptop 20</text>
+          <text x="700" y="118" text-anchor="middle" class="t-mute">layers 77–80</text>
+          <text x="700" y="134" text-anchor="middle" class="t-mute">+ output head</text>
+          <path d="M760 106 L808 106" style="stroke:var(--brass)" stroke-width="2" marker-end="url(#ar2)"/>
+          <text x="812" y="110" class="t-fg" font-size="13" font-weight="700">Next word</text>
+        </g>
+        <text x="270" y="60" text-anchor="middle" class="t-brass" font-size="11">16 KB per hop</text>
+        <text x="450" y="60" text-anchor="middle" class="t-brass" font-size="11">16 KB per hop</text>
+        <text x="450" y="190" text-anchor="middle" class="t-mute" font-size="12">Only the hidden state crosses the network: 8,192 numbers per token, about 16 KB. The weights never move.</text>
+        <text x="450" y="210" text-anchor="middle" class="t-mute" font-size="12">With 20 conversations in flight, every laptop works at once, each on a different request.</text>
+      </svg>
+    </div>
+  </figure>
+  <div class="split">
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Rough numbers (estimates)</th><th class="r">20 laptops</th></tr></thead>
+        <tbody>
+          <tr><td>Pooled RAM for the model (about 10 GB free each)</td><td class="r num">~200 GB</td></tr>
+          <tr><td>Llama 3.3 70B per laptop</td><td class="r num">~2.1 GB</td></tr>
+          <tr><td>Network per token (20 hops × 16 KB, gigabit)</td><td class="r num">~10–25 ms</td></tr>
+          <tr><td>One conversation, laptop CPUs ~2–3× slower than this desktop</td><td class="r num">~5–7 s / token</td></tr>
+          <tr><td>Twenty conversations at once (pipelined)</td><td class="r num">up to ~20× the work</td></tr>
+          <tr><td>One 16 GB laptop alone, streaming from disk</td><td class="r num">well over 10 s / token</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div style="display:grid; gap:12px; min-width:0">
+      <p class="note"><b>Feasible:</b> splitting a model's layers across machines is a known technique, and open-source projects such as llama.cpp's RPC backend, exo and Petals run it today. Windlass already streams one layer at a time, so a node is a natural unit: it just keeps its slice resident and passes the result on. The pooled RAM could also hold models far bigger than 70B.</p>
+      <p class="note"><b>What it would take:</b> today Windlass listens on loopback only, by design. Hive mode needs an owner decision to listen on the ship's network, with authentication, encryption and an accreditation path; a known list of nodes rather than open discovery; a coordinator that splits layers by each node's playbook; and recovery when a laptop leaves. A single conversation gets no faster than one laptop doing all the math, so the win is capacity and many users at once.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="eyebrow">Built for agents</div>
+  <h2>Every new command speaks JSON</h2>
+  <p>The playbook commands follow the Fleet CLI parity proposal: <span class="mono">&lt;noun&gt; &lt;verb&gt;</span> names, <span class="mono">--json</span> with a versioned schema, <span class="mono">--out</span> that writes UTF-8 without a BOM, clear exit codes, and nothing that waits on a dialog. An agent can ask Windlass what it can do and how this machine is set up, then act on the answer.</p>
+  <pre><span class="c">&gt; Launch-Windlass.bat commands --json</span>
+{"schema":"<span class="k">windlass.commands/1</span>","commands":[{"name":"serve",...},{"name":"playbook probe",...},{"name":"playbook show",...}]}
+<span class="c">&gt; Launch-Windlass.bat playbook probe --model &lt;file&gt; --json --out playbook.json</span>
+{"schema":"<span class="k">windlass.playbook/1</span>","machine":{...},"measured":{...},"settings":{...},"rules":[...]}</pre>
+</section>
+
+<section>
+  <div class="eyebrow">Status and next</div>
+  <h2>Where it stands</h2>
+  <ol class="next">
+    <li><b>Merged:</b> fleet brand and README, PowerShell 7 launch fix, the stress-test report (phases 1–6).</li>
+    <li><b>Open for review:</b> the machine playbook (Windlass PR #7); guess-ahead, half-size conversation memory and learning from real runs (PR #8); the quality score and the speed/quality design (PR #9). 35 tests pass. Measured 2.4× faster end to end on the same request, same answer.</li>
+    <li><b>Tonight:</b> finish stress phases 7–8 on the current release, then run the stress test on the playbook build.</li>
+    <li><b>Next in the engine:</b> a faster batch path (cuts the 60-minute long prompt and makes guess-ahead pay on big machines).</li>
+    <li><b>For a decision:</b> hive mode across laptops (needs network listening approved), and GPU offload through Vulkan (needs an approved exception).</li>
+    <li><b>Later:</b> smaller quantizations for laptops, batching queued requests, mixture-of-experts models such as OpenAI's gpt-oss.</li>
+  </ol>
+</section>
+
+<footer>
+  <span>Windlass · <a href="https://github.com/fleethacker-data-crucible/Windlass">fleethacker-data-crucible/Windlass</a> · stress-test report in <span class="mono">docs/STRESS-TEST.md</span></span>
+  <span>Measured on a Ryzen 9 9950X3D, 96 GB RAM, Samsung 9100 PRO PCIe 5.0 NVMe, Windows 11 Pro, CPU only. Predictions are labelled as predictions.</span>
+</footer>
+
+</div>
+
+</body>
+</html>
