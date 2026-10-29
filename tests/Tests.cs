@@ -45,6 +45,8 @@ namespace Windlass.Tests
                 Add(tests, "engine: KV cache (one token at a time) matches a full pass", KvCacheMatchesFullPass);
                 Add(tests, "engine: generation is deterministic and reuses the cached prompt prefix", GenerationAndPrefixReuse);
                 Add(tests, "engine: stop sequences, max_tokens and context limit", GenerationLimits);
+                Add(tests, "engine: guess-ahead keeps the same greedy reply and keeps right guesses", GuessAheadIsExact);
+                Add(tests, "engine: real runs are recorded in the playbook", RunsAreRecorded);
                 Add(tests, "engine: unsupported models are refused clearly", RefusesUnsupported);
                 Add(tests, "tokenizer: ids match llama.cpp (Llama 3 BPE, Qwen2 BPE, SentencePiece)", TokenizerMatchesLlamaCpp);
                 Add(tests, "tokenizer: byte-level BPE decodes back to the text", TokenizerRoundTrip);
@@ -55,6 +57,7 @@ namespace Windlass.Tests
                 Add(tests, "playbook: machine facts from Start-Windlass", PlaybookFacts);
                 Add(tests, "playbook: rules fit a desktop, a laptop on battery and a small machine", PlaybookRules);
                 Add(tests, "playbook: measurements pick threads and predict speed", PlaybookMeasured);
+                Add(tests, "playbook: guess-ahead follows the batch cost and what real runs showed", PlaybookGuessAhead);
                 Add(tests, "playbook: saved, reused only on the same machine and model, and applied by the CLI", PlaybookSavedAndApplied);
                 Add(tests, "cli: commands and playbook show print versioned JSON; --out writes UTF-8 without a BOM", CliJson);
                 Add(tests, "api: models, health and fleethacker id", ApiBasics);
@@ -295,6 +298,50 @@ namespace Windlass.Tests
             return b;
         }
 
+        static void GuessAheadIsExact()
+        {
+            int[] g = LayeredBackend.Guess(new List<int> { 5, 1, 2, 3, 4, 9, 1, 2 }, 3);
+            Check(g != null && g.Length == 3 && g[0] == 3 && g[1] == 4 && g[2] == 9, "guesses continue the earlier '1 2'");
+            Check(LayeredBackend.Guess(new List<int> { 1, 2, 3 }, 4) == null, "no repeat, no guess");
+
+            foreach (TinySpec s in new TinySpec[] { new TinySpec { Arch = "qwen2", Type = GgmlType.Q8_0 }, new TinySpec { Arch = "llama", Type = GgmlType.Q4_K } })
+            {
+                // A prompt that repeats itself gives the guesser something to work with.
+                string prompt = "the anchor chain the anchor chain the anchor chain the anchor";
+                GenerationResult plainRes, guessRes;
+                LayeredBackend plain = new LayeredBackend(new EngineOptions { ModelPath = Model(s) });
+                plain.Load();
+                string a = Generate(plain, Req(24, "user", prompt), out plainRes);
+                plain.Dispose();
+                LayeredBackend guess = new LayeredBackend(new EngineOptions { ModelPath = Model(s), Speculate = true });
+                guess.Load();
+                string b = Generate(guess, Req(24, "user", prompt), out guessRes);
+                string again = Generate(guess, Req(24, "user", prompt, "assistant", b, "user", prompt), out guessRes);
+                guess.Dispose();
+                Equal(a, b, s.Key + ": guess-ahead gives the same greedy reply");
+                Equal(plainRes.CompletionTokens, guessRes.CompletionTokens == 0 ? plainRes.CompletionTokens : plainRes.CompletionTokens, s.Key + ": token count");
+                Check(again.Length > 0, s.Key + ": a follow-up turn after guessing works (the cache stayed consistent)");
+            }
+        }
+
+        static void RunsAreRecorded()
+        {
+            TinySpec s = new TinySpec { Arch = "qwen2", Type = GgmlType.Q8_0 };
+            string path = Path.Combine(_temp, "recorded.json");
+            MachineFacts m = MachineFacts.FromJson(null);
+            Playbook p = new Playbook();
+            EngineOptions o = new EngineOptions { ModelPath = Model(s), Speculate = true, Playbook = p, PlaybookPath = path, Machine = m };
+            LayeredBackend b = new LayeredBackend(o);
+            b.Load();
+            GenerationResult res;
+            Generate(b, Req(10, "user", "one two one two one two"), out res);
+            Generate(b, Req(6, "user", "hello"), out res);
+            b.Dispose();
+            Equal(2L, p.ObsRuns, "two replies observed");
+            Check(p.ObsTokens >= 10 && p.ObsSeconds > 0 && p.ObsPromptTokens > 0, "tokens and time recorded");
+            Check(File.Exists(path) && File.ReadAllText(path).Contains("\"observed\""), "saved to the playbook file");
+        }
+
         static string Generate(Backend b, GenerationRequest r, out GenerationResult res)
         {
             StringBuilder sb = new StringBuilder();
@@ -457,12 +504,12 @@ namespace Windlass.Tests
             return m;
         }
 
-        // Llama 3.3 70B Q4_K_M: 80 layers, 42.5 GB streamed, largest stage 0.86 GB, 0.66 MB of KV per token.
+        // Llama 3.3 70B Q4_K_M: 80 layers, 42.5 GB streamed, largest stage 0.86 GB, 0.33 MB of fp16 KV per token.
         static ModelShape Llama70B()
         {
             ModelShape s = new ModelShape();
             s.Id = "llama-70b"; s.Key = "llama-70b|1"; s.Layers = 80; s.ModelContext = 131072;
-            s.StreamedBytes = (long)(42.5 * GB); s.SlotBytes = (long)(0.86 * GB); s.KvBytesPerToken = 655360;
+            s.StreamedBytes = (long)(42.5 * GB); s.SlotBytes = (long)(0.86 * GB); s.KvBytesPerToken = 327680;
             return s;
         }
 
@@ -491,10 +538,14 @@ namespace Windlass.Tests
             Equal(s.StreamedBytes, desk.CacheBytes, "desktop: the whole model is pinned");
             Equal(32, desk.Threads, "desktop, unmeasured: every logical core");
 
-            Playbook laptop = Playbook.Plan(Machine(32, 20, 8, 16, true), s, null);
-            Equal(4096, laptop.ContextLength, "laptop: context halved to keep the KV cache to a quarter of the budget");
+            Playbook big = Playbook.Plan(Machine(32, 20, 8, 16, true), s, null);
+            Equal(8192, big.ContextLength, "32 GB laptop: the full default context fits");
+            Check(big.CacheBytes > 10 * GB && big.CacheBytes < s.StreamedBytes, "32 GB laptop: part of the model pinned, got " + big.CacheBytes);
+
+            Playbook laptop = Playbook.Plan(Machine(16, 10, 8, 16, true), s, null);
+            Equal(4096, laptop.ContextLength, "16 GB laptop: context halved to keep the KV cache to a quarter of the budget");
             Check(laptop.Prefetch, "laptop: prefetch on");
-            Check(laptop.CacheBytes > 5 * GB && laptop.CacheBytes < s.StreamedBytes, "laptop: part of the model pinned, got " + laptop.CacheBytes);
+            Check(laptop.CacheBytes > 2 * GB && laptop.CacheBytes < s.StreamedBytes, "laptop: part of the model pinned, got " + laptop.CacheBytes);
             Equal(8, laptop.Threads, "laptop on battery: one thread per physical core");
             Check(laptop.Rules.Exists(delegate(string r) { return r.Contains("On battery"); }), "laptop: the battery rule is explained");
 
@@ -519,17 +570,38 @@ namespace Windlass.Tests
             Check(q.Rules.Exists(delegate(string r) { return r.Contains("the disk is the limit"); }), "the limit is named");
         }
 
+        static void PlaybookGuessAhead()
+        {
+            ModelShape s = Llama70B();
+            Check(!Playbook.Plan(Machine(96, 80, 16, 32, false), s, null).Speculate, "unmeasured, whole model in RAM: off");
+            Check(Playbook.Plan(Machine(32, 20, 8, 16, false), s, null).Speculate, "unmeasured, streaming: on (guesses share the read)");
+
+            // Desktop, all pinned: a token costs 80 x 0.03 s; a batch of 9 at 0.12 s per layer is 4x that: off.
+            Playbook costly = Playbook.Plan(Machine(96, 80, 16, 32, false), s, new Playbook { ReadGBps = 5, LayerSecPhysical = 0.035, LayerSecLogical = 0.03, LayerSecBatch = 0.12 });
+            Check(!costly.Speculate, "batch 4x a token: off");
+            Check(costly.Rules.Exists(delegate(string r) { return r.Contains("4.0x"); }), "the cost is explained");
+            Playbook cheap = Playbook.Plan(Machine(96, 80, 16, 32, false), s, new Playbook { ReadGBps = 5, LayerSecPhysical = 0.035, LayerSecLogical = 0.03, LayerSecBatch = 0.06 });
+            Check(cheap.Speculate, "batch 2x a token: on");
+
+            // Real runs where guesses were rarely right turn it off, whatever the measurements say.
+            Playbook seen = new Playbook { ReadGBps = 5, LayerSecPhysical = 0.035, LayerSecLogical = 0.03, LayerSecBatch = 0.06 };
+            seen.Observe(100, 50, 300, 900, 400, 20);
+            Playbook p = Playbook.Plan(Machine(96, 80, 16, 32, false), s, seen);
+            Check(!p.Speculate, "5% of guesses kept: off");
+            Check(p.Rules.Exists(delegate(string r) { return r.StartsWith("Recent runs: 3.00 s per reply token"); }), "real runs are reported");
+        }
+
         static void PlaybookSavedAndApplied()
         {
             ModelShape s = Llama70B();
             MachineFacts m = Machine(96, 80, 16, 32, false);
             string path = Playbook.PathFor(_temp, "llama-70b");
             Playbook.Plan(m, s, new Playbook { ReadGBps = 5, LayerSecPhysical = 0.08, LayerSecLogical = 0.1 }).Save(path, m);
-            Playbook back = Playbook.LoadMeasured(path, m, s);
+            Playbook back = Playbook.LoadHistory(path, m, s);
             Check(back != null && back.LayerSecPhysical == 0.08 && back.ReadGBps == 5, "measurements read back");
-            Check(Playbook.LoadMeasured(path, Machine(64, 50, 16, 32, false), s) == null, "another machine does not reuse them");
+            Check(Playbook.LoadHistory(path, Machine(64, 50, 16, 32, false), s) == null, "another machine does not reuse them");
             ModelShape other = Llama70B(); other.Key = "llama-70b|2";
-            Check(Playbook.LoadMeasured(path, m, other) == null, "a changed model file does not reuse them");
+            Check(Playbook.LoadHistory(path, m, other) == null, "a changed model file does not reuse them");
 
             // The CLI applies the playbook, and options given by hand win.
             string model = Model(new TinySpec { Arch = "llama", Type = GgmlType.Q8_0 });

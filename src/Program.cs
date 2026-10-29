@@ -41,6 +41,7 @@ Options:
   --no-prefetch           do not read the next layer while the current one computes
   --threads <n>           worker threads for the math (default: every logical core, or the playbook's choice)
   --no-playbook           ignore the playbook; use the defaults and the options given
+  --guess / --no-guess    guess-ahead for greedy replies on or off (default: the playbook's choice, else off)
   --chat-template <name>  llama3, chatml, mistral, mistral-v7 or llama2 (default: detected)
   --max-tokens <n>        max_tokens for requests that give none (default 1024)
   --max-queue <n>         requests that may wait behind the running one (default 8)
@@ -96,7 +97,7 @@ Options:
             }
         }
 
-        static readonly string[] Flags = { "no-prefetch", "no-playbook", "stub", "verbose", "json" };
+        static readonly string[] Flags = { "no-prefetch", "no-playbook", "stub", "verbose", "json", "guess", "no-guess" };
 
         public static Dictionary<string, string> ParseArgs(string[] args, int from)
         {
@@ -160,7 +161,9 @@ Options:
             if (o.ContainsKey("context-length")) e.ContextLength = Int(o, "context-length", 0, 16, 1 << 20);
             if (o.ContainsKey("cache-gb")) e.CacheBytes = (long)(Dbl(o, "cache-gb", 0, 0, 1 << 20) * 1e9);
             if (o.ContainsKey("threads")) e.Threads = Int(o, "threads", 0, 1, 4096);
-            if (e.Playbook != null && (o.ContainsKey("no-prefetch") || o.ContainsKey("context-length") || o.ContainsKey("cache-gb") || o.ContainsKey("threads")))
+            if (o.ContainsKey("guess")) e.Speculate = true;
+            if (o.ContainsKey("no-guess")) e.Speculate = false;
+            if (e.Playbook != null && (o.ContainsKey("no-prefetch") || o.ContainsKey("context-length") || o.ContainsKey("cache-gb") || o.ContainsKey("threads") || o.ContainsKey("guess") || o.ContainsKey("no-guess")))
                 e.Playbook.Rules.Add("Options given on the command line override the playbook where they differ.");
             return e;
         }
@@ -172,7 +175,7 @@ Options:
             ModelShape s = ModelShape.From(g, c, e.ModelId ?? LayeredBackend.DefaultId(e.ModelPath));
             MachineFacts m = MachineFacts.Detect();
             string path = Playbook.PathFor(root, s.Id);
-            Playbook p = Playbook.Plan(m, s, Playbook.LoadMeasured(path, m, s));
+            Playbook p = Playbook.Plan(m, s, Playbook.LoadHistory(path, m, s));
             try { p.Save(path, m); }
             catch (IOException) { }
             catch (UnauthorizedAccessException) { }
@@ -180,7 +183,10 @@ Options:
             e.Prefetch = p.Prefetch;
             e.ContextLength = p.ContextLength;
             e.Threads = p.Threads;
+            e.Speculate = p.Speculate;
             e.Playbook = p;
+            e.PlaybookPath = path;
+            e.Machine = m;
         }
 
         // playbook probe: reads a few layers and times one layer's math with physical and with logical cores, then
@@ -199,7 +205,7 @@ Options:
             MachineFacts m = MachineFacts.Detect();
             string file = Playbook.PathFor(root, id);
             if (measure && !json) Console.WriteLine("Measuring: reading a few layers and timing one layer's math...");
-            Playbook p = Playbook.Plan(m, s, measure ? Measure(g, c, m) : Playbook.LoadMeasured(file, m, s));
+            Playbook p = Playbook.Plan(m, s, measure ? Measure(g, c, m) : Playbook.LoadHistory(file, m, s));
             p.Save(file, m);
 
             string outPath;
@@ -219,12 +225,13 @@ Options:
             if (p.Measured)
             {
                 Console.WriteLine("read speed      " + p.ReadGBps.ToString("F1") + " GB/s (from Windows' file cache if the model was read recently)");
-                Console.WriteLine("one layer       " + p.LayerSecPhysical.ToString("F3") + " s on " + m.PhysicalCores + " threads, " + p.LayerSecLogical.ToString("F3") + " s on " + m.LogicalCores);
+                Console.WriteLine("one layer       " + p.LayerSecPhysical.ToString("F3") + " s on " + m.PhysicalCores + " threads, " + p.LayerSecLogical.ToString("F3") + " s on " + m.LogicalCores +
+                    (p.LayerSecBatch > 0 ? "; " + p.LayerSecBatch.ToString("F3") + " s for " + (LayeredBackend.MaxGuesses + 1) + " tokens at once" : ""));
             }
             else Console.WriteLine("measured        not yet: run Launch-Windlass.bat playbook probe --model <file>");
             Console.WriteLine();
             Console.WriteLine("Playbook (" + file + "):");
-            Console.WriteLine("  context " + p.ContextLength + ", prefetch " + (p.Prefetch ? "on" : "off") + ", pinned " + (p.CacheBytes / 1e9).ToString("F1") + " GB, " + p.Threads + " threads");
+            Console.WriteLine("  context " + p.ContextLength + ", prefetch " + (p.Prefetch ? "on" : "off") + ", pinned " + (p.CacheBytes / 1e9).ToString("F1") + " GB, " + p.Threads + " threads, guess-ahead " + (p.Speculate ? "on" : "off"));
             foreach (string r in p.Rules) Console.WriteLine("  - " + r);
             return 0;
         }
@@ -232,7 +239,7 @@ Options:
         // commands: the CLI describes itself, so an agent can find every command and its inputs and outputs.
         static readonly string[][] CommandList =
         {
-            new[] { "serve", "--model [--model-id --port --api-key --context-length --cache-gb --no-prefetch --threads --no-playbook --chat-template --max-tokens --max-queue --keepalive --stub --verbose]", "an OpenAI-compatible server on 127.0.0.1 (see docs/API.md)" },
+            new[] { "serve", "--model [--model-id --port --api-key --context-length --cache-gb --no-prefetch --threads --guess --no-guess --no-playbook --chat-template --max-tokens --max-queue --keepalive --stub --verbose]", "an OpenAI-compatible server on 127.0.0.1 (see docs/API.md)" },
             new[] { "run", "--model --prompt [--system --max-tokens --temperature and the serve options above]", "one reply in the console" },
             new[] { "info", "--model", "the model's shape, sizes and RAM needs (text)" },
             new[] { "playbook probe", "--model [--model-id --json --out]", "windlass.playbook/1: machine, measurements, settings, rules; saved in playbooks\\" },
@@ -277,16 +284,18 @@ Options:
                     foreach (int i in picks) last = st.Acquire(i);
                     double secs = Math.Max(sw.Elapsed.TotalSeconds, 1e-6);
                     r.ReadGBps = (st.BytesRead - before) / 1e9 / secs;
-                    r.LayerSecLogical = TimeLayer(last, m.LogicalCores);
-                    r.LayerSecPhysical = m.PhysicalCores < m.LogicalCores ? TimeLayer(last, m.PhysicalCores) : r.LayerSecLogical;
+                    r.LayerSecLogical = TimeLayer(last, m.LogicalCores, 1);
+                    r.LayerSecPhysical = m.PhysicalCores < m.LogicalCores ? TimeLayer(last, m.PhysicalCores, 1) : r.LayerSecLogical;
+                    // A token plus a full set of guesses in one pass, as guess-ahead checks them.
+                    r.LayerSecBatch = TimeLayer(last, r.LayerSecPhysical < r.LayerSecLogical * 0.97 ? m.PhysicalCores : m.LogicalCores, LayeredBackend.MaxGuesses + 1);
                 }
             }
             finally { Transformer.Threads = saved; }
             return r;
         }
 
-        // Best of three: every matrix of one layer times a single token, as when generating.
-        static double TimeLayer(Stage s, int threads)
+        // Best of three: every matrix of one layer times T tokens (1 = generating one token).
+        static double TimeLayer(Stage s, int threads, int T)
         {
             Transformer.Threads = threads;
             List<WeightView> mats = new List<WeightView>();
@@ -295,14 +304,14 @@ Options:
             float[][] xs = new float[mats.Count][], ys = new float[mats.Count][];
             for (int i = 0; i < mats.Count; i++)
             {
-                xs[i] = new float[mats[i].Cols]; ys[i] = new float[mats[i].Rows];
+                xs[i] = new float[mats[i].Cols * T]; ys[i] = new float[mats[i].Rows * T];
                 for (int j = 0; j < xs[i].Length; j++) xs[i][j] = (float)(rng.NextDouble() - 0.5);
             }
             double best = double.MaxValue;
             for (int rep = 0; rep < 3; rep++)
             {
                 Stopwatch sw = Stopwatch.StartNew();
-                for (int i = 0; i < mats.Count; i++) Transformer.MatMul(mats[i], xs[i], 1, ys[i]);
+                for (int i = 0; i < mats.Count; i++) Transformer.MatMul(mats[i], xs[i], T, ys[i]);
                 best = Math.Min(best, sw.Elapsed.TotalSeconds);
             }
             return best;
@@ -393,7 +402,7 @@ Options:
             foreach (KeyValuePair<string, long> kv in types) Console.Write(" " + kv.Key + " " + (kv.Value / 1e9).ToString("F2") + " GB;");
             Console.WriteLine();
             Console.WriteLine("shape           embd " + c.Embd + ", heads " + c.Heads + "/" + c.KvHeads + " kv, head dim " + c.HeadDim + ", vocab " + c.Vocab);
-            Console.WriteLine("context         " + c.ContextLength + " (KV cache " + (2.0 * c.Layers * c.KvDim * 4 / 1e6).ToString("F2") + " MB per token)");
+            Console.WriteLine("context         " + c.ContextLength + " (KV cache " + (2.0 * c.Layers * c.KvDim * 2 / 1e6).ToString("F2") + " MB per token)");
             Console.WriteLine("tokenizer       " + (tok.Spm ? "SentencePiece" : "byte-level BPE") + ", chat template " + tpl.Name);
             foreach (string w in c.Warnings) Console.WriteLine("warning         " + w);
             return 0;

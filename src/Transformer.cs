@@ -13,7 +13,7 @@ namespace Windlass
         public readonly LayerStream Stream;
         readonly GgufTensor _embd;
         readonly float[] _ropeFreqs;            // rope_freqs.weight (Llama 3.1+ long-context factors), or null
-        readonly float[][] _k, _v;              // per layer: [position][KvDim]
+        readonly ushort[][] _k, _v;             // per layer: [position][KvDim], fp16 like llama.cpp's default KV cache
         readonly float[][] _rope;               // per position: cos/sin pairs, computed once (the same for every layer)
         int _capacity;
 
@@ -32,8 +32,8 @@ namespace Windlass
             _embd = g.TensorsByName["token_embd.weight"];
             GgufTensor rf;
             if (g.TensorsByName.TryGetValue("rope_freqs.weight", out rf)) _ropeFreqs = ReadVector(g, rf);
-            _k = new float[c.Layers][];
-            _v = new float[c.Layers][];
+            _k = new ushort[c.Layers][];
+            _v = new ushort[c.Layers][];
             _rope = new float[maxContext][];
         }
 
@@ -60,7 +60,7 @@ namespace Windlass
             int cap = Math.Max(positions, Math.Min(MaxContext, Math.Max(256, _capacity * 2)));
             for (int l = 0; l < C.Layers; l++)
             {
-                float[] nk = new float[(long)cap * C.KvDim], nv = new float[(long)cap * C.KvDim];
+                ushort[] nk = new ushort[(long)cap * C.KvDim], nv = new ushort[(long)cap * C.KvDim];
                 if (_k[l] != null) { Array.Copy(_k[l], nk, (long)Length * C.KvDim); Array.Copy(_v[l], nv, (long)Length * C.KvDim); }
                 _k[l] = nk; _v[l] = nv;
             }
@@ -128,8 +128,8 @@ namespace Windlass
                 Rope(q, (long)t * QD, C.Heads, cs);
                 Rope(k, (long)t * KD, C.KvHeads, cs);
             }
-            Array.Copy(k, 0, _k[l], (long)pos0 * KD, (long)T * KD);
-            Array.Copy(v, 0, _v[l], (long)pos0 * KD, (long)T * KD);
+            ToHalf(k, _k[l], (long)pos0 * KD, (long)T * KD);
+            ToHalf(v, _v[l], (long)pos0 * KD, (long)T * KD);
 
             float[] att = new float[(long)T * QD];
             Attention(l, q, T, pos0, att);
@@ -148,21 +148,37 @@ namespace Windlass
             for (long i = 0; i < x.Length; i++) x[i] += o[i];
         }
 
+        static void ToHalf(float[] src, ushort[] dst, long at, long n)
+        {
+            fixed (float* s = src) fixed (ushort* d = dst)
+                for (long i = 0; i < n; i++) d[at + i] = Half.FromFloat(s[i]);
+        }
+
         void Attention(int l, float[] q, int T, int pos0, float[] outp)
         {
             int H = C.Heads, HD = C.HeadDim, QD = C.QDim, KD = C.KvDim, group = C.Heads / C.KvHeads;
             float scale = 1f / (float)Math.Sqrt(HD);
-            float[] K = _k[l], V = _v[l];
+            ushort[] K = _k[l], V = _v[l];
+            float[] table = Half.Lookup;
             Parallel.For(0, T * H, Par, () => new float[pos0 + T], delegate(int job, ParallelLoopState st, float[] scores)
             {
                 int t = job / H, h = job % H, n = pos0 + t + 1, kvh = h / group;
-                fixed (float* qp0 = q) fixed (float* Kp = K) fixed (float* Vp = V) fixed (float* op0 = outp) fixed (float* sp = scores)
+                fixed (float* qp0 = q) fixed (ushort* Kp = K) fixed (ushort* Vp = V) fixed (float* op0 = outp) fixed (float* sp = scores) fixed (float* tab = table)
                 {
                     float* qp = qp0 + (long)t * QD + h * HD;
                     float max = float.NegativeInfinity;
                     for (int j = 0; j < n; j++)
                     {
-                        float d = Dot(qp, Kp + (long)j * KD + kvh * HD, HD) * scale;
+                        ushort* kp = Kp + (long)j * KD + kvh * HD;
+                        float s0 = 0, s1 = 0, s2 = 0, s3 = 0;
+                        int i = 0;
+                        for (; i + 4 <= HD; i += 4)
+                        {
+                            s0 += qp[i] * tab[kp[i]]; s1 += qp[i + 1] * tab[kp[i + 1]];
+                            s2 += qp[i + 2] * tab[kp[i + 2]]; s3 += qp[i + 3] * tab[kp[i + 3]];
+                        }
+                        for (; i < HD; i++) s0 += qp[i] * tab[kp[i]];
+                        float d = ((s0 + s1) + (s2 + s3)) * scale;
                         sp[j] = d;
                         if (d > max) max = d;
                     }
@@ -174,8 +190,8 @@ namespace Windlass
                     for (int j = 0; j < n; j++)
                     {
                         float p = sp[j] * inv;
-                        float* vp = Vp + (long)j * KD + kvh * HD;
-                        for (int d = 0; d < HD; d++) op[d] += p * vp[d];
+                        ushort* vp = Vp + (long)j * KD + kvh * HD;
+                        for (int d = 0; d < HD; d++) op[d] += p * tab[vp[d]];
                     }
                 }
                 return scores;
