@@ -71,6 +71,26 @@ if ($command -eq 'serve' -and -not ($cliArgs | Where-Object { $_ -eq '--port' -o
     $cliArgs += @('--port', [string]$fleet.Port)
 }
 
+# Machine facts for the playbook (Playbook.cs): CPU, cores, RAM, battery, graphics. Read-only CIM queries; free RAM
+# is read by the engine itself when it picks settings. Anything that fails is left out and the playbook uses defaults.
+if (@('serve', 'run', 'probe', 'playbook') -contains $command) {
+    $facts = @{}
+    try {
+        $cpu = @(Get-CimInstance Win32_Processor -ErrorAction Stop)
+        $facts.cpu = ([string]$cpu[0].Name).Trim()
+        $facts.physicalCores = [int](($cpu | Measure-Object -Property NumberOfCores -Sum).Sum)
+        $facts.totalRam = [double](Get-CimInstance Win32_ComputerSystem -ErrorAction Stop).TotalPhysicalMemory
+    } catch { Write-Verbose "CPU/RAM facts unavailable: $($_.Exception.Message)" }
+    try {
+        $battery = @(Get-CimInstance Win32_Battery -ErrorAction Stop)
+        $facts.hasBattery = $battery.Count -gt 0
+        $facts.onBattery = @($battery | Where-Object { $_.BatteryStatus -eq 1 }).Count -gt 0
+    } catch { Write-Verbose "Battery facts unavailable: $($_.Exception.Message)" }
+    try { $facts.gpus = @(Get-CimInstance Win32_VideoController -ErrorAction Stop | ForEach-Object { [string]$_.Name }) }
+    catch { Write-Verbose "Graphics facts unavailable: $($_.Exception.Message)" }
+    $env:WINDLASS_MACHINE = $facts | ConvertTo-Json -Compress
+}
+
 $cp = New-Object System.CodeDom.Compiler.CompilerParameters
 $cp.GenerateInMemory = $true
 $cp.CompilerOptions = '/unsafe /optimize+'

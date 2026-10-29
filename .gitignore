@@ -12,3 +12,5 @@ desktop.ini
 # models are never committed
 models/
 *.gguf
+# machine playbooks are per computer
+playbooks/

@@ -20,6 +20,16 @@ namespace Windlass
   Launch-Windlass.bat serve --model <file.gguf> [options]   run the server on http://127.0.0.1:8777/v1
   Launch-Windlass.bat run   --model <file.gguf> --prompt <text> [options]   one reply in the console
   Launch-Windlass.bat info  --model <file.gguf>   model shape, sizes and RAM needed
+  Launch-Windlass.bat playbook probe --model <file.gguf> [--json] [--out <file>]
+                          measure this computer and write its playbook for the model (also: probe)
+  Launch-Windlass.bat playbook show  --model <file.gguf> [--json] [--out <file>]
+                          the settings serve and run would use now, and why (measures nothing)
+  Launch-Windlass.bat commands [--json]   every command with its inputs and outputs
+
+serve and run pick their settings from this computer's playbook (RAM free, cores, battery; plus measurements after
+playbook probe). Any option below that you give yourself overrides the playbook's choice. --json prints a versioned
+JSON document instead of text; --out writes it to a file as UTF-8 without a BOM. Exit code 0 is success, 1 an error,
+2 a usage error.
 
 Options:
   --model <path>          a .gguf file (for a split model, any one of its -0000N-of-0000M.gguf parts)
@@ -29,6 +39,8 @@ Options:
   --context-length <n>    context to allow (default: the model's, at most 8192)
   --cache-gb <n>          keep up to n GB of layers resident in RAM instead of re-reading them (default 0)
   --no-prefetch           do not read the next layer while the current one computes
+  --threads <n>           worker threads for the math (default: every logical core, or the playbook's choice)
+  --no-playbook           ignore the playbook; use the defaults and the options given
   --chat-template <name>  llama3, chatml, mistral, mistral-v7 or llama2 (default: detected)
   --max-tokens <n>        max_tokens for requests that give none (default 1024)
   --max-queue <n>         requests that may wait behind the running one (default 8)
@@ -49,19 +61,32 @@ Options:
             try { Console.OutputEncoding = new UTF8Encoding(false); } catch (IOException) { }   // no console (hidden start)
             if (args.Length == 0 || args[0] == "help" || args[0] == "--help" || args[0] == "-h") { Console.WriteLine(Usage); return args.Length == 0 ? 2 : 0; }
             if (args[0] == "--version") { Console.WriteLine("windlass " + version); return 0; }
+            // Two-word commands (<noun> <verb>, as in the Fleet CLI parity proposal) take their options after the verb.
+            string command = args[0];
+            int optionsFrom = 1;
+            if (command == "playbook")
+            {
+                if (args.Length < 2 || args[1].StartsWith("--")) { Console.Error.WriteLine("playbook needs a verb: probe or show. Run Launch-Windlass.bat help."); return 2; }
+                command = "playbook " + args[1];
+                optionsFrom = 2;
+            }
+            else if (command == "probe") command = "playbook probe";
             Dictionary<string, string> o;
-            try { o = ParseArgs(args, 1); }
+            try { o = ParseArgs(args, optionsFrom); }
             catch (ArgumentException e) { Console.Error.WriteLine(e.Message); return 2; }
             Log.Verbose = o.ContainsKey("verbose");
             try
             {
-                switch (args[0])
+                switch (command)
                 {
                     case "serve": return Serve(o, root, scriptPath, version);
-                    case "run": return RunOnce(o);
+                    case "run": return RunOnce(o, root);
                     case "info": return Info(o);
+                    case "playbook probe": return PlaybookCommand(o, root, true);
+                    case "playbook show": return PlaybookCommand(o, root, false);
+                    case "commands": return Commands(o);
                 }
-                Console.Error.WriteLine("Unknown command '" + args[0] + "'.\n\n" + Usage);
+                Console.Error.WriteLine("Unknown command '" + command + "'.\n\n" + Usage);
                 return 2;
             }
             catch (Exception e)
@@ -71,7 +96,7 @@ Options:
             }
         }
 
-        static readonly string[] Flags = { "no-prefetch", "stub", "verbose" };
+        static readonly string[] Flags = { "no-prefetch", "no-playbook", "stub", "verbose", "json" };
 
         public static Dictionary<string, string> ParseArgs(string[] args, int from)
         {
@@ -120,7 +145,9 @@ Options:
             return n;
         }
 
-        public static EngineOptions Engine(Dictionary<string, string> o)
+        // Settings for the engine: this computer's playbook first (root = the Windlass folder, null = no playbook),
+        // then every option the user gave, which wins.
+        public static EngineOptions Engine(Dictionary<string, string> o, string root)
         {
             EngineOptions e = new EngineOptions();
             e.ModelPath = Path.GetFullPath(Need(o, "model"));
@@ -128,10 +155,157 @@ Options:
             string v;
             if (o.TryGetValue("model-id", out v)) e.ModelId = v;
             if (o.TryGetValue("chat-template", out v)) e.ChatTemplate = v;
-            e.Prefetch = !o.ContainsKey("no-prefetch");
-            e.ContextLength = Int(o, "context-length", 0, 16, 1 << 20);
-            e.CacheBytes = (long)(Dbl(o, "cache-gb", 0, 0, 1 << 20) * 1e9);
+            if (root != null && !o.ContainsKey("no-playbook")) ApplyPlaybook(e, root);
+            if (o.ContainsKey("no-prefetch")) e.Prefetch = false;
+            if (o.ContainsKey("context-length")) e.ContextLength = Int(o, "context-length", 0, 16, 1 << 20);
+            if (o.ContainsKey("cache-gb")) e.CacheBytes = (long)(Dbl(o, "cache-gb", 0, 0, 1 << 20) * 1e9);
+            if (o.ContainsKey("threads")) e.Threads = Int(o, "threads", 0, 1, 4096);
+            if (e.Playbook != null && (o.ContainsKey("no-prefetch") || o.ContainsKey("context-length") || o.ContainsKey("cache-gb") || o.ContainsKey("threads")))
+                e.Playbook.Rules.Add("Options given on the command line override the playbook where they differ.");
             return e;
+        }
+
+        static void ApplyPlaybook(EngineOptions e, string root)
+        {
+            GgufModelFile g = GgufModelFile.Open(e.ModelPath);
+            ModelConfig c = ModelConfig.From(g);
+            ModelShape s = ModelShape.From(g, c, e.ModelId ?? LayeredBackend.DefaultId(e.ModelPath));
+            MachineFacts m = MachineFacts.Detect();
+            string path = Playbook.PathFor(root, s.Id);
+            Playbook p = Playbook.Plan(m, s, Playbook.LoadMeasured(path, m, s));
+            try { p.Save(path, m); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+            e.CacheBytes = p.CacheBytes;
+            e.Prefetch = p.Prefetch;
+            e.ContextLength = p.ContextLength;
+            e.Threads = p.Threads;
+            e.Playbook = p;
+        }
+
+        // playbook probe: reads a few layers and times one layer's math with physical and with logical cores, then
+        // writes the playbook that serve and run will use on this computer.
+        // playbook show: the settings serve and run would pick right now (free RAM changes), using saved measurements.
+        static int PlaybookCommand(Dictionary<string, string> o, string root, bool measure)
+        {
+            bool json = o.ContainsKey("json");
+            string path = Path.GetFullPath(Need(o, "model"));
+            if (!File.Exists(path)) throw new FileNotFoundException("No model file at " + path, path);
+            GgufModelFile g = GgufModelFile.Open(path);
+            ModelConfig c = ModelConfig.From(g);
+            string id;
+            if (!o.TryGetValue("model-id", out id)) id = LayeredBackend.DefaultId(path);
+            ModelShape s = ModelShape.From(g, c, id);
+            MachineFacts m = MachineFacts.Detect();
+            string file = Playbook.PathFor(root, id);
+            if (measure && !json) Console.WriteLine("Measuring: reading a few layers and timing one layer's math...");
+            Playbook p = Playbook.Plan(m, s, measure ? Measure(g, c, m) : Playbook.LoadMeasured(file, m, s));
+            p.Save(file, m);
+
+            string outPath;
+            if (json || o.TryGetValue("out", out outPath))
+            {
+                string doc = p.ToJson(m);
+                if (o.TryGetValue("out", out outPath)) File.WriteAllText(Path.GetFullPath(outPath), doc, new UTF8Encoding(false));
+                else Console.WriteLine(doc);
+                if (!json) Console.WriteLine("Wrote " + Path.GetFullPath(outPath));
+                return 0;
+            }
+            Console.WriteLine("computer        " + m.Cpu + ", " + m.PhysicalCores + " cores / " + m.LogicalCores + " threads");
+            Console.WriteLine("RAM             " + (m.TotalRam / 1e9).ToString("F1") + " GB total, " + (m.AvailableRam / 1e9).ToString("F1") + " GB free");
+            Console.WriteLine("power           " + (m.HasBattery ? (m.OnBattery ? "on battery" : "plugged in (has a battery)") : "mains (no battery)"));
+            if (m.Gpus.Count > 0) Console.WriteLine("graphics        " + string.Join(", ", m.Gpus.ToArray()) + " (not used yet: Windlass computes on the CPU)");
+            Console.WriteLine("model           " + id + ": " + c.Layers + " layers, " + (s.StreamedBytes / 1e9).ToString("F1") + " GB to stream");
+            if (p.Measured)
+            {
+                Console.WriteLine("read speed      " + p.ReadGBps.ToString("F1") + " GB/s (from Windows' file cache if the model was read recently)");
+                Console.WriteLine("one layer       " + p.LayerSecPhysical.ToString("F3") + " s on " + m.PhysicalCores + " threads, " + p.LayerSecLogical.ToString("F3") + " s on " + m.LogicalCores);
+            }
+            else Console.WriteLine("measured        not yet: run Launch-Windlass.bat playbook probe --model <file>");
+            Console.WriteLine();
+            Console.WriteLine("Playbook (" + file + "):");
+            Console.WriteLine("  context " + p.ContextLength + ", prefetch " + (p.Prefetch ? "on" : "off") + ", pinned " + (p.CacheBytes / 1e9).ToString("F1") + " GB, " + p.Threads + " threads");
+            foreach (string r in p.Rules) Console.WriteLine("  - " + r);
+            return 0;
+        }
+
+        // commands: the CLI describes itself, so an agent can find every command and its inputs and outputs.
+        static readonly string[][] CommandList =
+        {
+            new[] { "serve", "--model [--model-id --port --api-key --context-length --cache-gb --no-prefetch --threads --no-playbook --chat-template --max-tokens --max-queue --keepalive --stub --verbose]", "an OpenAI-compatible server on 127.0.0.1 (see docs/API.md)" },
+            new[] { "run", "--model --prompt [--system --max-tokens --temperature and the serve options above]", "one reply in the console" },
+            new[] { "info", "--model", "the model's shape, sizes and RAM needs (text)" },
+            new[] { "playbook probe", "--model [--model-id --json --out]", "windlass.playbook/1: machine, measurements, settings, rules; saved in playbooks\\" },
+            new[] { "playbook show", "--model [--model-id --json --out]", "windlass.playbook/1 for the settings serve and run would use now" },
+            new[] { "commands", "[--json]", "windlass.commands/1: this list" },
+        };
+
+        static int Commands(Dictionary<string, string> o)
+        {
+            if (!o.ContainsKey("json"))
+            {
+                foreach (string[] c in CommandList) Console.WriteLine(c[0].PadRight(16) + c[1] + "\n" + "".PadRight(16) + "-> " + c[2]);
+                return 0;
+            }
+            List<object> list = new List<object>();
+            foreach (string[] c in CommandList)
+            {
+                Dictionary<string, object> d = new Dictionary<string, object>();
+                d["name"] = c[0]; d["inputs"] = c[1]; d["output"] = c[2];
+                list.Add(d);
+            }
+            Dictionary<string, object> doc = new Dictionary<string, object>();
+            doc["schema"] = "windlass.commands/1";
+            doc["commands"] = list;
+            Console.WriteLine(Json.Write(doc));
+            return 0;
+        }
+
+        static unsafe Playbook Measure(GgufModelFile g, ModelConfig c, MachineFacts m)
+        {
+            Playbook r = new Playbook();
+            int saved = Transformer.Threads;
+            try
+            {
+                using (LayerStream st = new LayerStream(g, c, false, 0))
+                {
+                    List<int> picks = new List<int>();
+                    foreach (int i in new int[] { c.Layers / 4, c.Layers / 2, 3 * c.Layers / 4 }) if (!picks.Contains(i)) picks.Add(i);
+                    long before = st.BytesRead;
+                    Stopwatch sw = Stopwatch.StartNew();
+                    Stage last = null;
+                    foreach (int i in picks) last = st.Acquire(i);
+                    double secs = Math.Max(sw.Elapsed.TotalSeconds, 1e-6);
+                    r.ReadGBps = (st.BytesRead - before) / 1e9 / secs;
+                    r.LayerSecLogical = TimeLayer(last, m.LogicalCores);
+                    r.LayerSecPhysical = m.PhysicalCores < m.LogicalCores ? TimeLayer(last, m.PhysicalCores) : r.LayerSecLogical;
+                }
+            }
+            finally { Transformer.Threads = saved; }
+            return r;
+        }
+
+        // Best of three: every matrix of one layer times a single token, as when generating.
+        static double TimeLayer(Stage s, int threads)
+        {
+            Transformer.Threads = threads;
+            List<WeightView> mats = new List<WeightView>();
+            foreach (WeightView w in s.Views.Values) if (w.Rows > 1) mats.Add(w);
+            Random rng = new Random(1);
+            float[][] xs = new float[mats.Count][], ys = new float[mats.Count][];
+            for (int i = 0; i < mats.Count; i++)
+            {
+                xs[i] = new float[mats[i].Cols]; ys[i] = new float[mats[i].Rows];
+                for (int j = 0; j < xs[i].Length; j++) xs[i][j] = (float)(rng.NextDouble() - 0.5);
+            }
+            double best = double.MaxValue;
+            for (int rep = 0; rep < 3; rep++)
+            {
+                Stopwatch sw = Stopwatch.StartNew();
+                for (int i = 0; i < mats.Count; i++) Transformer.MatMul(mats[i], xs[i], 1, ys[i]);
+                best = Math.Min(best, sw.Elapsed.TotalSeconds);
+            }
+            return best;
         }
 
         static int Serve(Dictionary<string, string> o, string root, string scriptPath, string version)
@@ -154,7 +328,7 @@ Options:
                 stub.TokenDelayMs = 200;
                 backend = stub;
             }
-            else backend = new LayeredBackend(Engine(o));
+            else backend = new LayeredBackend(Engine(o, root));
 
             string logs = Path.Combine(root, "logs");
             Log.ToFile(Path.Combine(logs, "Windlass_" + DateTime.Now.ToString("yyyy_MM_dd_HHmmss") + ".log"));
@@ -178,9 +352,9 @@ Options:
             return 0;
         }
 
-        static int RunOnce(Dictionary<string, string> o)
+        static int RunOnce(Dictionary<string, string> o, string root)
         {
-            LayeredBackend b = new LayeredBackend(Engine(o));
+            LayeredBackend b = new LayeredBackend(Engine(o, root));
             b.Load();
             GenerationRequest r = new GenerationRequest();
             string sys;

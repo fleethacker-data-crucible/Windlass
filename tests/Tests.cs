@@ -52,6 +52,11 @@ namespace Windlass.Tests
                 Add(tests, "stop scanner holds back partial stop sequences", StopScannerWorks);
                 Add(tests, "sampler: greedy, seeded and top_p", SamplerWorks);
                 Add(tests, "cli: argument parsing", CliArgs);
+                Add(tests, "playbook: machine facts from Start-Windlass", PlaybookFacts);
+                Add(tests, "playbook: rules fit a desktop, a laptop on battery and a small machine", PlaybookRules);
+                Add(tests, "playbook: measurements pick threads and predict speed", PlaybookMeasured);
+                Add(tests, "playbook: saved, reused only on the same machine and model, and applied by the CLI", PlaybookSavedAndApplied);
+                Add(tests, "cli: commands and playbook show print versioned JSON; --out writes UTF-8 without a BOM", CliJson);
                 Add(tests, "api: models, health and fleethacker id", ApiBasics);
                 Add(tests, "api: non-streaming reply with usage", ApiPlain);
                 Add(tests, "api: streaming chunks, usage chunk and [DONE]", ApiStream);
@@ -437,6 +442,139 @@ namespace Windlass.Tests
             try { Program.ParseArgs(new string[] { "serve", "--model" }, 1); throw new TestFailure("a missing value must fail"); }
             catch (ArgumentException) { }
             Equal(2, Program.Run(new string[] { "serve", "--bogus" }, _temp, null, "0"), "a missing value is a usage error");
+            Equal(2, Program.Run(new string[] { "playbook" }, _temp, null, "0"), "playbook without a verb is a usage error");
+        }
+
+        // ---------------- playbook ----------------
+
+        const long GB = 1000000000L;
+
+        static MachineFacts Machine(double totalGb, double freeGb, int physical, int logical, bool onBattery)
+        {
+            MachineFacts m = MachineFacts.FromJson(null);
+            m.Cpu = "test CPU"; m.TotalRam = (long)(totalGb * GB); m.AvailableRam = (long)(freeGb * GB);
+            m.PhysicalCores = physical; m.LogicalCores = logical; m.HasBattery = onBattery; m.OnBattery = onBattery;
+            return m;
+        }
+
+        // Llama 3.3 70B Q4_K_M: 80 layers, 42.5 GB streamed, largest stage 0.86 GB, 0.66 MB of KV per token.
+        static ModelShape Llama70B()
+        {
+            ModelShape s = new ModelShape();
+            s.Id = "llama-70b"; s.Key = "llama-70b|1"; s.Layers = 80; s.ModelContext = 131072;
+            s.StreamedBytes = (long)(42.5 * GB); s.SlotBytes = (long)(0.86 * GB); s.KvBytesPerToken = 655360;
+            return s;
+        }
+
+        static void PlaybookFacts()
+        {
+            MachineFacts m = MachineFacts.FromJson("{\"cpu\":\" AMD Ryzen 9 9950X3D \",\"physicalCores\":16,\"totalRam\":100000000000,\"hasBattery\":true,\"onBattery\":true,\"gpus\":[\"Radeon\",\"iGPU\"]}");
+            Equal("AMD Ryzen 9 9950X3D", m.Cpu, "cpu trimmed");
+            Equal(Math.Min(16, Math.Max(1, Environment.ProcessorCount)), m.PhysicalCores, "physical cores (capped by this machine's logical cores)");
+            Equal(100000000000L, m.TotalRam, "total RAM");
+            Check(m.HasBattery && m.OnBattery, "battery flags");
+            Equal(2, m.Gpus.Count, "gpus list");
+            MachineFacts one = MachineFacts.FromJson("{\"gpus\":\"Only GPU\"}");   // ConvertTo-Json may flatten a one-item list
+            Equal(1, one.Gpus.Count, "a single gpu given as a string");
+            MachineFacts none = MachineFacts.FromJson("not json");
+            Equal(Environment.ProcessorCount, none.LogicalCores, "bad JSON falls back to what .NET reports");
+            Equal(none.LogicalCores, none.PhysicalCores, "physical cores default to logical");
+        }
+
+        static void PlaybookRules()
+        {
+            ModelShape s = Llama70B();
+
+            Playbook desk = Playbook.Plan(Machine(96, 80, 16, 32, false), s, null);
+            Equal(8192, desk.ContextLength, "desktop: full default context");
+            Check(desk.Prefetch, "desktop: prefetch on");
+            Equal(s.StreamedBytes, desk.CacheBytes, "desktop: the whole model is pinned");
+            Equal(32, desk.Threads, "desktop, unmeasured: every logical core");
+
+            Playbook laptop = Playbook.Plan(Machine(32, 20, 8, 16, true), s, null);
+            Equal(4096, laptop.ContextLength, "laptop: context halved to keep the KV cache to a quarter of the budget");
+            Check(laptop.Prefetch, "laptop: prefetch on");
+            Check(laptop.CacheBytes > 5 * GB && laptop.CacheBytes < s.StreamedBytes, "laptop: part of the model pinned, got " + laptop.CacheBytes);
+            Equal(8, laptop.Threads, "laptop on battery: one thread per physical core");
+            Check(laptop.Rules.Exists(delegate(string r) { return r.Contains("On battery"); }), "laptop: the battery rule is explained");
+
+            Playbook small = Playbook.Plan(Machine(8, 3, 4, 8, false), s, null);
+            Equal(Playbook.MinContext, small.ContextLength, "small: smallest context");
+            Check(!small.Prefetch, "small: prefetch off");
+            Equal(0L, small.CacheBytes, "small: nothing pinned");
+            Check(small.Rules.Exists(delegate(string r) { return r.Contains("Very little free RAM"); }), "small: warns about RAM");
+            foreach (Playbook p in new Playbook[] { desk, laptop, small }) Check(p.Rules.Count >= 5, "every choice has a reason");
+        }
+
+        static void PlaybookMeasured()
+        {
+            ModelShape s = Llama70B();
+            Playbook m = new Playbook { ReadGBps = 5, LayerSecPhysical = 0.08, LayerSecLogical = 0.10 };
+            Playbook p = Playbook.Plan(Machine(96, 80, 16, 32, false), s, m);
+            Equal(16, p.Threads, "physical cores chosen when measured faster");
+            Check(Math.Abs(p.PredictedSecPerToken - 80 * 0.08) < 1e-6, "all pinned: compute sets the pace, got " + p.PredictedSecPerToken);
+            Playbook q = Playbook.Plan(Machine(32, 20, 8, 16, false), s, new Playbook { ReadGBps = 2, LayerSecPhysical = 0.1, LayerSecLogical = 0.1 });
+            Equal(16, q.Threads, "no faster on physical cores: keep every logical core");
+            Check(q.PredictedSecPerToken > 80 * 0.1, "laptop streaming: the disk is the limit, got " + q.PredictedSecPerToken);
+            Check(q.Rules.Exists(delegate(string r) { return r.Contains("the disk is the limit"); }), "the limit is named");
+        }
+
+        static void PlaybookSavedAndApplied()
+        {
+            ModelShape s = Llama70B();
+            MachineFacts m = Machine(96, 80, 16, 32, false);
+            string path = Playbook.PathFor(_temp, "llama-70b");
+            Playbook.Plan(m, s, new Playbook { ReadGBps = 5, LayerSecPhysical = 0.08, LayerSecLogical = 0.1 }).Save(path, m);
+            Playbook back = Playbook.LoadMeasured(path, m, s);
+            Check(back != null && back.LayerSecPhysical == 0.08 && back.ReadGBps == 5, "measurements read back");
+            Check(Playbook.LoadMeasured(path, Machine(64, 50, 16, 32, false), s) == null, "another machine does not reuse them");
+            ModelShape other = Llama70B(); other.Key = "llama-70b|2";
+            Check(Playbook.LoadMeasured(path, m, other) == null, "a changed model file does not reuse them");
+
+            // The CLI applies the playbook, and options given by hand win.
+            string model = Model(new TinySpec { Arch = "llama", Type = GgmlType.Q8_0 });
+            EngineOptions auto = Program.Engine(Program.ParseArgs(new string[] { "run", "--model", model }, 1), _temp);
+            Check(auto.Playbook != null && auto.ContextLength > 0 && auto.Threads > 0, "serve and run get a playbook");
+            Check(File.Exists(Playbook.PathFor(_temp, LayeredBackend.DefaultId(model))), "the playbook is saved");
+            EngineOptions hand = Program.Engine(Program.ParseArgs(new string[] { "run", "--model", model, "--threads", "3", "--no-prefetch", "--cache-gb", "0" }, 1), _temp);
+            Equal(3, hand.Threads, "--threads wins");
+            Check(!hand.Prefetch && hand.CacheBytes == 0, "--no-prefetch and --cache-gb win");
+            EngineOptions off = Program.Engine(Program.ParseArgs(new string[] { "run", "--model", model, "--no-playbook" }, 1), _temp);
+            Check(off.Playbook == null && off.Threads == 0 && off.Prefetch, "--no-playbook keeps the defaults");
+        }
+
+        static void CliJson()
+        {
+            TextWriter old = Console.Out;
+            StringWriter sw = new StringWriter();
+            string model = Model(new TinySpec { Arch = "llama", Type = GgmlType.Q8_0 });
+            string outFile = Path.Combine(_temp, "playbook-out.json");
+            int rc1, rc2, rc3, rc4;
+            try
+            {
+                Console.SetOut(sw);
+                rc1 = Program.Run(new string[] { "commands", "--json" }, _temp, null, "0");
+                rc2 = Program.Run(new string[] { "playbook", "show", "--model", model, "--json" }, _temp, null, "0");
+                rc3 = Program.Run(new string[] { "playbook", "show", "--model", model, "--out", outFile }, _temp, null, "0");
+                rc4 = Program.Run(new string[] { "playbook", "probe", "--model", model, "--json" }, _temp, null, "0");
+            }
+            finally { Console.SetOut(old); }
+            Equal(0, rc1, "commands exit code"); Equal(0, rc2, "playbook show exit code"); Equal(0, rc3, "playbook show --out exit code");
+            Equal(0, rc4, "playbook probe exit code");
+            string[] lines = sw.ToString().Split(new char[] { '\n' }, StringSplitOptions.RemoveEmptyEntries);
+            Dictionary<string, object> cmds = Json.Parse(lines[0].Trim()) as Dictionary<string, object>;
+            Equal("windlass.commands/1", Json.GetStr(cmds, "schema", ""), "commands schema");
+            Check(Json.Write(cmds).Contains("playbook probe"), "commands lists playbook probe");
+            Dictionary<string, object> pb = Json.Parse(lines[1].Trim()) as Dictionary<string, object>;
+            Equal("windlass.playbook/1", Json.GetStr(pb, "schema", ""), "playbook schema");
+            Check(pb.ContainsKey("settings") && pb.ContainsKey("rules") && pb.ContainsKey("machine"), "playbook has settings, rules and machine");
+            byte[] raw = File.ReadAllBytes(outFile);
+            Check(raw.Length > 3 && !(raw[0] == 0xEF && raw[1] == 0xBB && raw[2] == 0xBF), "--out writes no BOM");
+            Check(Json.Parse(Encoding.UTF8.GetString(raw)) is Dictionary<string, object>, "--out writes valid JSON");
+            Dictionary<string, object> probed = Json.Parse(lines[lines.Length - 1].Trim()) as Dictionary<string, object>;
+            Dictionary<string, object> measured = probed["measured"] as Dictionary<string, object>;
+            Check(Json.GetNum(measured, "readGBps", 0) > 0 && Json.GetNum(measured, "layerSecLogical", 0) > 0, "probe measures read speed and layer time");
+            Check(Json.GetNum(((Dictionary<string, object>)probed["settings"]), "predictedSecPerToken", 0) > 0, "probe predicts seconds per token");
         }
 
         // ---------------- API ----------------

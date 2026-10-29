@@ -16,6 +16,8 @@ namespace Windlass
         public long CacheBytes;              // keep this many bytes of layers resident (0 = stream every layer)
         public int ContextLength;            // 0 = min(model's, DefaultContext)
         public string ChatTemplate;          // null = detect
+        public int Threads;                  // 0 = every logical core
+        public Playbook Playbook;            // the settings' reasons, logged at load (null = set by hand)
         public const int DefaultContext = 8192;
     }
 
@@ -53,14 +55,17 @@ namespace Windlass
             Template = ChatTemplate.Detect(_g, Tokenizer, _o.ChatTemplate);
             int ctx = _o.ContextLength > 0 ? _o.ContextLength : Math.Min(Config.ContextLength, EngineOptions.DefaultContext);
             ContextLength = ctx;
+            Transformer.Threads = _o.Threads;
+            if (_o.Playbook != null) foreach (string r in _o.Playbook.Rules) Log.Info("playbook: " + r);
             _stream = new LayerStream(_g, Config, _o.Prefetch, _o.CacheBytes);
             Model = new Transformer(_g, Config, _stream, ctx);
             foreach (string w in Config.Warnings) Log.Warn(w);
             if (Tokenizer.Warning != null) Log.Warn(Tokenizer.Warning);
             Log.Info(string.Format("{0}: {1}, {2} layers, {3:F1} GB of weights, context {4}, chat template {5}",
                 ModelId, Config.Arch, Config.Layers, _g.TotalBytes / 1e9, ctx, Template.Name));
-            Log.Info(string.Format("RAM: {0:F2} GB per layer slot x {1}, {2:F1} GB of layers kept resident, KV cache up to {3:F1} GB",
-                _stream.SlotBytes / 1e9, _o.Prefetch ? 2 : 1, _stream.CachedBytes / 1e9, 2.0 * Config.Layers * Config.KvDim * 4.0 * ctx / 1e9));
+            Log.Info(string.Format("RAM: {0:F2} GB per layer slot x {1}, {2:F1} GB of layers kept resident, KV cache up to {3:F1} GB, {4} threads",
+                _stream.SlotBytes / 1e9, _o.Prefetch ? 2 : 1, _stream.CachedBytes / 1e9, 2.0 * Config.Layers * Config.KvDim * 4.0 * ctx / 1e9,
+                _o.Threads > 0 ? _o.Threads : Environment.ProcessorCount));
             Log.Info("Loaded in " + sw.Elapsed.TotalSeconds.ToString("F1") + " s");
             State = BackendState.Ready;
         }
