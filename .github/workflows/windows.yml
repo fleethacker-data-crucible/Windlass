@@ -1,0 +1,28 @@
+name: Windlass Windows tests
+on:
+  push:
+    branches: [main, 'feature/**']
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  windows:
+    name: windlass-windows
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Compile and test C# 5 on Windows PowerShell 5.1
+        shell: powershell
+        env:
+          GITHUB_TOKEN: ''
+          GH_TOKEN: ''
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($PSVersionTable.PSVersion.Major -ne 5) { throw 'Windows PowerShell 5.1 is required.' }
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests\Run-Tests.ps1
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File src\Start-Windlass.ps1 check
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
