@@ -91,6 +91,15 @@ MoE is **not parity-checked against llama.cpp** (there is no llama.cpp on the bu
 float reference written independently in `tests\MoeTests.cs`. Check a real small MoE file (for example
 Qwen3-30B-A3B) against llama.cpp's logits before relying on it.
 
+`granite` (Granite 3 dense: the Llama graph plus `embedding_scale`, `residual_scale`, `attention.scale` and
+`logit_scale` from the file, as llama.cpp applies them) and `olmo2` (OLMo 2: no norm before attention or the FFN, the
+attention and FFN outputs are normalised before the residual add, Q and K are normalised over their whole vectors,
+NEOX RoPE). Both are checked only against a float reference written in `tests\ArchTests.cs`, not against llama.cpp,
+and neither has its chat template or pre-tokenizer built in: Granite (`refact`) and OLMo 2 (`dbrx`) fall back to the
+GPT-2 pre-tokenizer rules with a warning, and the chat template falls back to ChatML, which is wrong for both. Treat
+them as experimental until a real file has been compared with llama.cpp and the templates are added. Granite MoE and
+the hybrid Granite 4 (`granitehybrid`) are not supported.
+
 Not yet: I-quants (`IQ*`), vision models, and other architectures (Gemma is Phoenix's job; `qwen35` is not supported
 yet). Windlass says so and refuses them at load.
 

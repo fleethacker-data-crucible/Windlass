@@ -38,6 +38,7 @@ Windlass sets itself up for the computer it runs on (free RAM, cores, battery): 
 
 - **Runs models bigger than your GPU or RAM.** Only about two layers are in memory at once, and the next one is read while the current one computes. A 70B Q4_K_M model needs about 2 GB plus the KV cache.
 - **Llama 2/3, Mistral, Qwen2/2.5 and dense Qwen3** GGUF files in the usual quantizations (`Q8_0` to `Q2_K`), with built-in tokenizers and chat templates.
+- **Granite 3 dense and OLMo 2** (`granite`, `olmo2`): the forward pass is tested against an independent reference, not against llama.cpp, and their chat templates and pre-tokenizers are not built in yet ([docs/USAGE.md](docs/USAGE.md#models)).
 - **Mixture-of-experts models** (Mixtral-style `llama`, `qwen2moe`, `qwen3moe`): only the chosen experts compute, but a layer still streams every expert. Tested against an independent reference on tiny models; not yet logit-checked against llama.cpp on a real MoE file.
 - **OpenAI-compatible API**: chat completions with streaming, usage, keepalives during long layer passes, a FIFO queue and cancel on disconnect ([docs/API.md](docs/API.md)).
 - **Fairlead's `deep-local` route.** Register Windlass in Fairlead as a local provider, reachable only by name, so interactive tools never wait on it.

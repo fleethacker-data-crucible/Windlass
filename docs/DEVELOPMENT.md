@@ -18,6 +18,9 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests\Run-Tests.ps1
   layouts; `tests\MoeTests.cs` checks them against a naive double-precision reference written in the test (decode,
   route, mix), the one-expert case against the dense model, top-k and renormalisation, that only chosen experts
   compute, and streaming and KV-cache exactness. None of it compares with llama.cpp.
+- **Granite and OLMo 2.** `tests\TinyArchs.cs` and `tests\ArchTests.cs`: a reference match for the scales (Granite)
+  and the post-norms and full-vector QK norm (OLMo 2), a Granite file with no scale keys equal to the Llama model,
+  and streaming and KV-cache exactness. Not compared with llama.cpp.
 - **Tokenizer.** Token ids match llama.cpp's for Llama 3 BPE, Qwen2 BPE and SentencePiece vocabularies, including
   special tokens, Unicode and whitespace runs.
 - **API.** A real server on loopback port 18777 (the suite's CI range) against a stub model checks the contract in

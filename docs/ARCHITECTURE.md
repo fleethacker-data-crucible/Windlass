@@ -64,5 +64,7 @@ can wait.
   `qwen3moe` run with only the chosen experts computed; see [USAGE.md](USAGE.md#models). A layer is still streamed
   with all its experts, so a big MoE is still bound by the disk when it does not fit in RAM. Speed is unmeasured on
   real MoE models.
+- **`granite` and `olmo2`: forward pass done, not parity-checked against llama.cpp**; chat templates and pre-tokenizers
+  for them are still to do.
 - More architectures, one family at a time. `qwen35` (Qwen 3.5's hybrid of attention and gated delta-net recurrent
   layers) is still not started.
