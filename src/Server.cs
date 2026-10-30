@@ -1,7 +1,8 @@
 // OpenAI-compatible HTTP API on loopback (HttpListener). C# 5 only.
 // Endpoints: POST /v1/chat/completions (stream or not), GET /v1/models, GET /v1/models/{id}, GET /health, and the
 // FleetHacker GET /__fleethacker/id + POST /__fleethacker/shutdown (edge-ops PORTS.md).
-// One generation runs at a time; others wait in a bounded FIFO queue (beyond it: 503). A streaming request gets its
+// One generation runs at a time (or, with --batch N, up to N together); others wait in a bounded FIFO queue (beyond it:
+// 503). A streaming request gets its
 // headers and an SSE comment as soon as it is accepted, then ": keepalive" comments while it waits or while a slow
 // layer pass runs, so a router can tell slow from dead.
 using System;
@@ -27,19 +28,20 @@ namespace Windlass
         public bool LoadOnStartup = true;
     }
 
-    // One running job and a bounded FIFO of waiting ones.
+    // The running jobs (one, or the batch size) and a bounded FIFO of waiting ones.
     public sealed class Scheduler
     {
         public sealed class Ticket { public bool Granted; public string Id; }
 
         readonly object _gate = new object();
         readonly LinkedList<Ticket> _queue = new LinkedList<Ticket>();
-        readonly int _max;
-        bool _busy;
+        readonly int _max, _slots;
+        int _running;
 
-        public Scheduler(int maxQueue) { _max = maxQueue; }
+        public Scheduler(int maxQueue) : this(maxQueue, 1) { }
+        public Scheduler(int maxQueue, int slots) { _max = maxQueue; _slots = Math.Max(1, slots); }
 
-        public bool Busy { get { lock (_gate) return _busy; } }
+        public bool Busy { get { lock (_gate) return _running > 0; } }
         public int Waiting { get { lock (_gate) return _queue.Count; } }
 
         // Claims a place now (so a full queue is a clean 503). Position 0 means it runs at once.
@@ -48,7 +50,7 @@ namespace Windlass
             lock (_gate)
             {
                 Ticket t = new Ticket { Id = id };
-                if (!_busy) { _busy = true; t.Granted = true; position = 0; return t; }
+                if (_running < _slots) { _running++; t.Granted = true; position = 0; return t; }
                 if (_queue.Count >= _max) throw new BackendException("Windlass is busy and its queue of " + _max + " is full", 503, "server_busy");
                 _queue.AddLast(t);
                 position = _queue.Count;
@@ -87,7 +89,7 @@ namespace Windlass
                 next.Granted = true;
                 Monitor.PulseAll(_gate);
             }
-            else _busy = false;
+            else _running--;
         }
     }
 
@@ -106,7 +108,7 @@ namespace Windlass
         {
             _backend = backend;
             _s = settings;
-            _sched = new Scheduler(settings.MaxQueue);
+            _sched = new Scheduler(settings.MaxQueue, backend.MaxConcurrent);
         }
 
         public WaitHandle Stopped { get { return _stopped; } }

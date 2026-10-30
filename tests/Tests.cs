@@ -13,7 +13,7 @@ using System.Threading;
 
 namespace Windlass.Tests
 {
-    public static class Runner
+    public static partial class Runner
     {
         static string _fixtures, _temp;
         static int _failed, _passed;
@@ -72,6 +72,12 @@ namespace Windlass.Tests
                 Add(tests, "api: client disconnect cancels the generation", ApiCancelOnDisconnect);
                 Add(tests, "api: Host and Origin checks", ApiHostOrigin);
                 Add(tests, "api: a real model end to end", ApiRealModel);
+                Add(tests, "batch: ForwardBatch gives the logits of separate runs, at different lengths", BatchForwardMatchesSingle);
+                Add(tests, "batch: N sequences stepped together read the model once per step, not N times", BatchReadsModelOncePerStep);
+                Add(tests, "batch: concurrent generations match single ones; prefix reuse per slot; batch 1 unchanged", BatchedBackendMatchesSingle);
+                Add(tests, "batch: concurrent API requests match sequential ones; a hang-up leaves the others alone", BatchApiConcurrency);
+                Add(tests, "batch: concurrent requests share the reads of the model", BatchRequestsShareReads);
+                Add(tests, "batch: RAM check, option validation and the scheduler's turns", BatchLimits);
                 foreach (KeyValuePair<string, Action> t in tests)
                 {
                     if (filter != null && t.Key.IndexOf(filter, StringComparison.OrdinalIgnoreCase) < 0) continue;
