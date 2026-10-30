@@ -13,7 +13,7 @@ using System.Threading;
 
 namespace Windlass.Tests
 {
-    public static class Runner
+    public static partial class Runner
     {
         static string _fixtures, _temp;
         static int _failed, _passed;
@@ -72,6 +72,12 @@ namespace Windlass.Tests
                 Add(tests, "api: client disconnect cancels the generation", ApiCancelOnDisconnect);
                 Add(tests, "api: Host and Origin checks", ApiHostOrigin);
                 Add(tests, "api: a real model end to end", ApiRealModel);
+                Add(tests, "fidelity: scoring is right on hand-made replies", FidelityScoring);
+                Add(tests, "fidelity: the log is deterministic, scales with the budget and never plants duplicate answers", FidelityGenerator);
+                Add(tests, "fidelity: the whole check scores a backend that answers from the log, asks greedily and honours cancel", FidelityPipeline);
+                Add(tests, "fidelity: playbook fidelity records a score on a tiny model and playbook show prints it", FidelityCli);
+                Add(tests, "api: /v1/models carries the windlass extension (null when unmeasured, numbers once measured)", ApiModelFacts);
+                Add(tests, "api: /v1/models from a real tiny model after probe, eval, fidelity and runs, without the engine lock", ApiModelFactsReal);
                 foreach (KeyValuePair<string, Action> t in tests)
                 {
                     if (filter != null && t.Key.IndexOf(filter, StringComparison.OrdinalIgnoreCase) < 0) continue;

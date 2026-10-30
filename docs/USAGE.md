@@ -9,6 +9,7 @@ Launch-Windlass.bat run   --model D:\models\model.gguf --prompt "Hi"   :: one re
 Launch-Windlass.bat playbook probe --model D:\models\model.gguf        :: measure this computer, write its playbook
 Launch-Windlass.bat playbook show  --model D:\models\model.gguf        :: the settings serve and run would use now, and why
 Launch-Windlass.bat playbook eval  --model D:\models\model.gguf        :: quality score (perplexity) and prompt speed
+Launch-Windlass.bat playbook fidelity --model D:\models\model.gguf     :: context fidelity: facts planted in a short log, recalled
 Launch-Windlass.bat commands --json                                    :: every command, for scripts and agents
 Launch-Windlass.bat check                                              :: locality checks and compile only
 Launch-Windlass.bat help                                               :: every option
@@ -47,8 +48,24 @@ better; compare quantizations of one model, or models that share a tokenizer) an
 score is kept in the playbook and shown by `playbook show`. How speed and quality are meant to trade off is in
 [SPEED-QUALITY.md](SPEED-QUALITY.md).
 
-`--json` on `playbook probe`, `playbook show`, `playbook eval` and `commands` prints a versioned JSON document (`windlass.playbook/1`,
-`windlass.commands/1`), and `--out <file>` writes it as UTF-8 without a BOM, so scripts and agents can use them
+`playbook fidelity` checks that the model still finds details in a long context (the same idea as the stress test's
+long-conversation phase, in miniature). It writes a synthetic ship's log (original text; every name, number and code is
+invented, and the same `--seed` gives the same log), plants `--facts` facts in it (default 4: a person, a quantity, a
+code and a place, in turn), then asks one question per fact through the normal chat path: greedy, 24 reply tokens at most.
+A reply scores when it contains the planted value as whole words (case, punctuation and thousands separators
+ignored; "Odile" does not recall "Odile Marrick"). The log is sized against the model's own tokenizer to about
+`--tokens` prompt tokens (default 300; if the facts alone need more, the shortest possible log is used and the real
+size is reported). `--questions <k>` asks only the first k. The result, `n of N recalled`, is kept in the playbook next to the
+perplexity and shown by `playbook show`; `--json` prints `windlass.fidelity/1` with every question, planted value and reply.
+
+Keep it small: the log is read as a prompt, which costs real time on a CPU (about 1.2 s per token for a 70B Q4_K_M model
+on the dev desktop in the stress test, so 300 tokens is several minutes and about 3,000 is an hour; later questions reuse the cached
+log). Long budgets are for you to run when you can spare the machine; a short log says little about a long
+conversation. A tiny random model recalls nothing (chance for free recall is close to zero), so the tests prove the
+machinery, not model quality.
+
+`--json` on `playbook probe`, `playbook show`, `playbook eval`, `playbook fidelity` and `commands` prints a versioned JSON document (`windlass.playbook/1`,
+`windlass.quality/1`, `windlass.fidelity/1`, `windlass.commands/1`), and `--out <file>` writes it as UTF-8 without a BOM, so scripts and agents can use them
 (see the Fleet CLI parity proposal). Exit code 0 is success, 1 an error, 2 a usage error.
 
 ## Options

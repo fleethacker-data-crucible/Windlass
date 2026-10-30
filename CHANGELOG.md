@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- `GET /v1/models` and `GET /v1/models/{id}` carry a `windlass` extension object (`windlass.model/1`, additive; every OpenAI field is unchanged): predicted and observed seconds per token and per prompt token with `measured` and `source`, the limiting resource (disk or CPU), perplexity with its token count and when it was measured, the context-fidelity score, quant, architecture, layer count, file bytes, context length, whether guess-ahead is on and the queue length. Never-measured values are `null`. Read from the playbook without the engine lock; `Backend.Facts()` is the new hook (documented in `docs/API.md`).
+- `playbook fidelity --model <file> [--facts N] [--tokens N] [--questions K] [--seed N]`: the context-fidelity check. A deterministic synthetic ship's log with N planted facts (names, numbers, codes invented for the test) is read as one prompt, then each fact is asked about (greedy, small `max_tokens`) and recalls are counted. Prints `windlass.fidelity/1` with `--json`; the score is saved in the playbook next to the perplexity and shown by `playbook show`. The default is small (4 facts, about 300 tokens); long budgets are slow on a CPU. A tiny random model scores about chance, so the tests prove the machinery, not model quality.
+
 - `playbook eval`: quality score (perplexity on a built-in passage written for the test (so no model has memorised it)) and prompt seconds per token, kept in the playbook; `docs/SPEED-QUALITY.md` sets out free vs costly speed-ups and the planned speed/quality dial.
 - Guess-ahead (prompt-lookup speculation) for greedy replies: up to 8 guesses from text already in the conversation, checked in one pass; the reply is unchanged. The playbook turns it on or off from a measured batch cost and from how many guesses real runs kept (`--guess` / `--no-guess` override).
 - The playbook learns from real runs (tokens, seconds, guesses kept), reports them in `playbook show` and uses them at the next start.

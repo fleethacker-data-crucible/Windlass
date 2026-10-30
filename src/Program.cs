@@ -26,6 +26,9 @@ namespace Windlass
                           the settings serve and run would use now, and why (measures nothing)
   Launch-Windlass.bat playbook eval  --model <file.gguf> [--tokens <n>] [--json] [--out <file>]
                           score quality: perplexity on a built-in passage (lower is better), and prompt speed
+  Launch-Windlass.bat playbook fidelity --model <file.gguf> [--facts <n>] [--tokens <n>] [--questions <k>] [--seed <n>] [--json] [--out <file>]
+                          context fidelity: plant n facts in a log of about <n> tokens, ask for them back, score the recalls
+                          (default 4 facts, 300 tokens: a long log is slow on a CPU)
   Launch-Windlass.bat commands [--json]   every command with its inputs and outputs
 
 serve and run pick their settings from this computer's playbook (RAM free, cores, battery; plus measurements after
@@ -69,7 +72,7 @@ Options:
             int optionsFrom = 1;
             if (command == "playbook")
             {
-                if (args.Length < 2 || args[1].StartsWith("--")) { Console.Error.WriteLine("playbook needs a verb: probe or show. Run Launch-Windlass.bat help."); return 2; }
+                if (args.Length < 2 || args[1].StartsWith("--")) { Console.Error.WriteLine("playbook needs a verb: probe, show, eval or fidelity. Run Launch-Windlass.bat help."); return 2; }
                 command = "playbook " + args[1];
                 optionsFrom = 2;
             }
@@ -88,6 +91,7 @@ Options:
                     case "playbook probe": return PlaybookCommand(o, root, true);
                     case "playbook show": return PlaybookCommand(o, root, false);
                     case "playbook eval": return PlaybookEval(o, root);
+                    case "playbook fidelity": return PlaybookFidelity(o, root);
                     case "commands": return Commands(o);
                 }
                 Console.Error.WriteLine("Unknown command '" + command + "'.\n\n" + Usage);
@@ -212,7 +216,7 @@ Options:
             if (measure)
             {
                 measured = Measure(g, c, m);
-                if (history != null) { measured.QualityPerplexity = history.QualityPerplexity; measured.QualityTokens = history.QualityTokens; measured.PromptSecPerToken = history.PromptSecPerToken; }
+                if (history != null) measured.CopyScoresFrom(history);
             }
             Playbook p = Playbook.Plan(m, s, measure ? measured : history);
             p.Save(file, m);
@@ -290,6 +294,64 @@ Options:
             return 0;
         }
 
+        // playbook fidelity: plants facts in a synthetic log, asks about them, and records how many were recalled in the
+        // playbook next to the perplexity. The default log is a few hundred tokens: every prompt costs real time on a CPU.
+        static int PlaybookFidelity(Dictionary<string, string> o, string root)
+        {
+            bool json = o.ContainsKey("json");
+            EngineOptions e = Engine(o, root);
+            e.PlaybookPath = null;   // the check is not a real run; recorded below as fidelity instead
+            int facts = Int(o, "facts", Fidelity.DefaultFacts, 1, Fidelity.MaxFacts);
+            int tokens = Int(o, "tokens", Fidelity.DefaultTokens, 64, 1 << 20);
+            int questions = Int(o, "questions", 0, 0, Fidelity.MaxFacts);
+            int seed = Int(o, "seed", Fidelity.DefaultSeed, 0, int.MaxValue);
+            if (questions > facts) throw new ArgumentException("--questions cannot be more than --facts.");
+            LayeredBackend b = new LayeredBackend(e);
+            FidelityResult f;
+            try
+            {
+                if (!json) Console.WriteLine("Loading " + b.ModelId + " and asking about " + facts + " facts planted in a log of about " + tokens + " tokens...");
+                b.Load();
+                f = b.CheckFidelity(facts, tokens, questions, seed, CancellationToken.None);
+            }
+            finally { b.Dispose(); }
+            Playbook p = e.Playbook;
+            string file = p != null ? Playbook.PathFor(root, b.ModelId) : null;
+            if (p != null)
+            {
+                p.SetFidelity(f);
+                GgufModelFile g = GgufModelFile.Open(e.ModelPath);
+                ModelShape s = ModelShape.From(g, ModelConfig.From(g), b.ModelId);
+                p = Playbook.Plan(e.Machine, s, p);
+                p.Save(file, e.Machine);
+            }
+            string outPath;
+            if (json || o.TryGetValue("out", out outPath))
+            {
+                Dictionary<string, object> r = new Dictionary<string, object>();
+                r["schema"] = "windlass.fidelity/1"; r["model"] = b.ModelId; r["version"] = (long)Fidelity.Version;
+                r["score"] = f.Score; r["correct"] = (long)f.Correct; r["total"] = (long)f.Total;
+                r["promptTokens"] = (long)f.PromptTokens; r["seed"] = (long)f.Seed; r["maxTokens"] = (long)f.MaxTokens; r["seconds"] = f.Seconds;
+                List<object> qs = new List<object>();
+                for (int i = 0; i < f.Total; i++)
+                {
+                    Dictionary<string, object> q = new Dictionary<string, object>();
+                    q["question"] = f.Asked[i].Question; q["planted"] = f.Asked[i].Answer; q["reply"] = f.Replies[i]; q["recalled"] = f.Recalled[i];
+                    qs.Add(q);
+                }
+                r["questions"] = qs;
+                string doc = Json.Write(r);
+                if (o.TryGetValue("out", out outPath)) File.WriteAllText(Path.GetFullPath(outPath), doc, new UTF8Encoding(false));
+                else Console.WriteLine(doc);
+                return 0;
+            }
+            Console.WriteLine("fidelity        " + f.Correct + " of " + f.Total + " planted facts recalled (" + (100.0 * f.Score).ToString("F0") + "%) in a " + f.PromptTokens + "-token log, " + f.Seconds.ToString("F1") + " s");
+            for (int i = 0; i < f.Total; i++)
+                Console.WriteLine("  " + (f.Recalled[i] ? "yes" : "no ") + "  " + f.Asked[i].Answer + "  <- " + f.Replies[i].Replace("\n", " ").Trim());
+            if (file != null) Console.WriteLine("recorded in     " + file);
+            return 0;
+        }
+
         // commands: the CLI describes itself, so an agent can find every command and its inputs and outputs.
         static readonly string[][] CommandList =
         {
@@ -299,6 +361,7 @@ Options:
             new[] { "playbook probe", "--model [--model-id --json --out]", "windlass.playbook/1: machine, measurements, settings, rules; saved in playbooks\\" },
             new[] { "playbook show", "--model [--model-id --json --out]", "windlass.playbook/1 for the settings serve and run would use now" },
             new[] { "playbook eval", "--model [--model-id --tokens --json --out]", "windlass.playbook/1 with quality: perplexity on the built-in passage (lower is better) and prompt seconds per token" },
+            new[] { "playbook fidelity", "--model [--model-id --facts --tokens --questions --seed --json --out]", "windlass.fidelity/1: facts recalled out of facts asked in a synthetic log of about --tokens tokens; the score is saved in the playbook" },
             new[] { "commands", "[--json]", "windlass.commands/1: this list" },
         };
 

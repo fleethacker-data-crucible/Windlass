@@ -35,6 +35,7 @@ namespace Windlass
         LayerStream _stream;
         readonly List<int> _cached = new List<int>();   // tokens whose K/V are in the cache, in order
         readonly object _run = new object();
+        volatile Dictionary<string, object> _loaded;    // facts about the loaded file, for /v1/models (built once by Load)
 
         public LayeredBackend(EngineOptions o)
         {
@@ -70,7 +71,39 @@ namespace Windlass
                 _stream.SlotBytes / 1e9, _o.Prefetch ? 2 : 1, _stream.CachedBytes / 1e9, 2.0 * Config.Layers * Config.KvDim * 2.0 * ctx / 1e9,
                 _o.Threads > 0 ? _o.Threads : Environment.ProcessorCount));
             Log.Info("Loaded in " + sw.Elapsed.TotalSeconds.ToString("F1") + " s");
+            _loaded = LoadedFacts(_g, Config, ctx);
             State = BackendState.Ready;
+        }
+
+        static Dictionary<string, object> LoadedFacts(GgufModelFile g, ModelConfig c, int ctx)
+        {
+            Dictionary<string, object> f = new Dictionary<string, object>();
+            Dictionary<string, long> bytes = new Dictionary<string, long>();
+            foreach (GgufTensor t in g.Tensors)
+            {
+                string n = GgmlTypes.Name(t.Type);
+                long v; bytes.TryGetValue(n, out v); bytes[n] = v + t.SizeBytes;
+            }
+            string quant = null; long most = -1;
+            foreach (KeyValuePair<string, long> kv in bytes) if (kv.Value > most) { most = kv.Value; quant = kv.Key; }
+            long file = 0;
+            foreach (string p in g.Paths) file += new FileInfo(p).Length;
+            f["architecture"] = c.Arch; f["quant"] = quant == null ? null : quant.ToUpperInvariant(); f["layers"] = (long)c.Layers; f["fileBytes"] = file;
+            f["contextLength"] = (long)ctx; f["modelContextLength"] = (long)c.ContextLength;
+            return f;
+        }
+
+        // What is known about this model and what the playbook measured on this machine, for GET /v1/models. Reads
+        // snapshots and the playbook's own lock, never the engine lock, so it answers while a reply is running.
+        public override Dictionary<string, object> Facts()
+        {
+            Dictionary<string, object> f = new Dictionary<string, object>();
+            Dictionary<string, object> loaded = _loaded;
+            if (loaded != null) foreach (KeyValuePair<string, object> kv in loaded) f[kv.Key] = kv.Value;
+            f["guessAhead"] = _o.Speculate;
+            Playbook p = _o.Playbook;
+            if (p != null) foreach (KeyValuePair<string, object> kv in p.ToFacts()) f[kv.Key] = kv.Value;
+            return f;
         }
 
         public List<int> EncodePrompt(IList<ChatMessage> messages)
@@ -212,6 +245,39 @@ namespace Windlass
                 r.Tokens = n;
                 r.Perplexity = Quality.Perplexity(logits, toks);
                 Model.Truncate(0);
+                return r;
+            }
+        }
+
+        // Plants `facts` facts in a synthetic log of about `tokens` prompt tokens and asks about them (see Fidelity.cs),
+        // through the normal chat path: greedy, small max_tokens, one request per question. The log is sized against this
+        // model's own tokenizer, so `tokens` counts the whole prompt. Holds the engine for the whole check, like Evaluate.
+        public FidelityResult CheckFidelity(int facts, int tokens, int questions, int seed, CancellationToken cancel)
+        {
+            lock (_run)
+            {
+                int target = Math.Min(tokens, ContextLength - Fidelity.ReplyTokens - 8);
+                int chars = Fidelity.CharsForTokens(target), bestTokens = 0;
+                FidelityCase best = null;
+                for (int pass = 0; pass < 4; pass++)
+                {
+                    FidelityCase c = Fidelity.Generate(seed, facts, chars);
+                    int n = EncodePrompt(Fidelity.Prompt(c, c.Facts[0])).Count;
+                    if (n <= target && n > bestTokens) { best = c; bestTokens = n; }
+                    if (n <= target && n >= target * 0.9) break;
+                    int next = (int)(chars * (double)target / Math.Max(n, 1) * 0.98);
+                    if (next == chars) next += n > target ? -1 : 1;
+                    chars = Math.Max(200, Math.Min(Fidelity.MaxChars, next));
+                }
+                if (best == null)
+                {
+                    best = Fidelity.Generate(seed, facts, 200);   // the least filler there can be
+                    bestTokens = EncodePrompt(Fidelity.Prompt(best, best.Facts[0])).Count;
+                    if (bestTokens > ContextLength - Fidelity.ReplyTokens - 8)
+                        throw new ArgumentException(facts + " planted facts need a prompt of at least " + bestTokens + " tokens; this context is " + ContextLength + ". Use fewer facts or a longer context.");
+                }
+                FidelityResult r = Fidelity.Run(this, best, questions, cancel);
+                r.PromptTokens = bestTokens;
                 return r;
             }
         }

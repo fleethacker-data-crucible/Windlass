@@ -46,7 +46,66 @@ namespace Windlass
         // Blocking. onText gets each new piece of text; onStage(done, total) reports layer progress.
         public abstract GenerationResult Generate(GenerationRequest request, Action<string> onText, Action<int, int> onStage, CancellationToken cancel);
 
+        // What this backend knows about its model and has measured, for the `windlass` object on /v1/models
+        // (ModelFacts.Shape lists the keys). A plain dictionary of nested dictionaries; keys it does not know are left
+        // out and published as null. Must not wait for a running generation.
+        public virtual Dictionary<string, object> Facts() { return new Dictionary<string, object>(); }
+
         public virtual void Dispose() { }
+    }
+
+    // The `windlass` extension object on a model card: a fixed set of keys, every one null until a backend reports it.
+    public static class ModelFacts
+    {
+        public const string Schema = "windlass.model/1";
+
+        static Dictionary<string, object> Figure()
+        {
+            Dictionary<string, object> d = new Dictionary<string, object>();
+            d["value"] = null; d["predicted"] = null; d["observed"] = null; d["measured"] = false; d["source"] = "none"; d["samples"] = null;
+            return d;
+        }
+
+        public static Dictionary<string, object> Shape()
+        {
+            Dictionary<string, object> m = new Dictionary<string, object>();
+            m["schema"] = Schema;
+            m["architecture"] = null; m["quant"] = null; m["layers"] = null; m["fileBytes"] = null;
+            m["contextLength"] = null; m["modelContextLength"] = null; m["guessAhead"] = null;
+            Dictionary<string, object> speed = new Dictionary<string, object>();
+            speed["secPerToken"] = Figure(); speed["secPerPromptToken"] = Figure(); speed["limit"] = null;
+            m["speed"] = speed;
+            Dictionary<string, object> q = new Dictionary<string, object>();
+            q["perplexity"] = null; q["tokens"] = null; q["measuredAt"] = null;
+            m["quality"] = q;
+            Dictionary<string, object> f = new Dictionary<string, object>();
+            f["score"] = null; f["correct"] = null; f["total"] = null; f["promptTokens"] = null; f["version"] = null; f["measuredAt"] = null;
+            m["fidelity"] = f;
+            Dictionary<string, object> queue = new Dictionary<string, object>();
+            queue["length"] = null; queue["max"] = null;
+            m["queue"] = queue;
+            return m;
+        }
+
+        // The shape with a backend's facts laid over it. Unknown keys are dropped so the object stays stable.
+        public static Dictionary<string, object> Build(Dictionary<string, object> facts)
+        {
+            Dictionary<string, object> m = Shape();
+            if (facts != null) Overlay(m, facts);
+            return m;
+        }
+
+        public static void Overlay(Dictionary<string, object> shape, Dictionary<string, object> facts)
+        {
+            foreach (KeyValuePair<string, object> kv in facts)
+            {
+                object slot;
+                if (!shape.TryGetValue(kv.Key, out slot) || kv.Key == "schema") continue;
+                Dictionary<string, object> inner = slot as Dictionary<string, object>, over = kv.Value as Dictionary<string, object>;
+                if (inner != null && over != null) Overlay(inner, over);
+                else if (inner == null && over == null) shape[kv.Key] = kv.Value;
+            }
+        }
     }
 
     // Holds back streamed text that could be the start of a stop sequence. Feed returns the text that is safe to send

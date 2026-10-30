@@ -302,7 +302,20 @@ namespace Windlass
             m["owned_by"] = "windlass";
             m["context_length"] = _backend.ContextLength;
             m["status"] = StateName();
+            m["windlass"] = WindlassFacts();
             return m;
+        }
+
+        // The `windlass` extension (docs/API.md): the backend's measured facts over a fixed shape of nulls, plus what only
+        // the server knows (the queue). Never waits for the running generation.
+        Dictionary<string, object> WindlassFacts()
+        {
+            Dictionary<string, object> facts = _backend.Facts() ?? new Dictionary<string, object>();
+            Dictionary<string, object> w = ModelFacts.Build(facts);
+            if (_backend.State == BackendState.Ready) w["contextLength"] = _backend.ContextLength;
+            Dictionary<string, object> queue = (Dictionary<string, object>)w["queue"];
+            queue["length"] = _sched.Waiting; queue["max"] = _s.MaxQueue;
+            return w;
         }
 
         bool Authorized(HttpListenerRequest req, HttpListenerResponse res)
