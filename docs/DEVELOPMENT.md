@@ -14,6 +14,10 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests\Run-Tests.ps1
   Their logits are compared with llama.cpp's for the same files (`tests\fixtures\llama-cpp-reference.txt`). Streamed,
   prefetched and resident runs must give identical logits, token-by-token decoding must match a full pass, and the
   fused kernels must match decode-then-dot.
+- **Mixture of experts.** `tests\TinyMoe.cs` writes tiny MoE models in the llama/mixtral, qwen2moe and qwen3moe
+  layouts; `tests\MoeTests.cs` checks them against a naive double-precision reference written in the test (decode,
+  route, mix), the one-expert case against the dense model, top-k and renormalisation, that only chosen experts
+  compute, and streaming and KV-cache exactness. None of it compares with llama.cpp.
 - **Tokenizer.** Token ids match llama.cpp's for Llama 3 BPE, Qwen2 BPE and SentencePiece vocabularies, including
   special tokens, Unicode and whitespace runs.
 - **API.** A real server on loopback port 18777 (the suite's CI range) against a stub model checks the contract in

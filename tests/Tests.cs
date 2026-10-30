@@ -16,6 +16,7 @@ namespace Windlass.Tests
     public static class Runner
     {
         static string _fixtures, _temp;
+        internal static string TempDir { get { return _temp; } }   // for test files that live in their own file (MoeTests.cs)
         static int _failed, _passed;
 
         public static int Main(string[] args)
@@ -72,6 +73,7 @@ namespace Windlass.Tests
                 Add(tests, "api: client disconnect cancels the generation", ApiCancelOnDisconnect);
                 Add(tests, "api: Host and Origin checks", ApiHostOrigin);
                 Add(tests, "api: a real model end to end", ApiRealModel);
+                MoeTests.Register(tests);
                 foreach (KeyValuePair<string, Action> t in tests)
                 {
                     if (filter != null && t.Key.IndexOf(filter, StringComparison.OrdinalIgnoreCase) < 0) continue;

@@ -78,8 +78,21 @@ GGUF files of the `llama` (Llama 2, Llama 3.x, Mistral 7B, Mistral Large and oth
 (Qwen2, Qwen2.5) and `qwen3` (dense Qwen3) architectures, in F32, F16, BF16, Q8_0, Q5_0, Q5_1, Q4_0, Q4_1, Q6_K,
 Q5_K, Q4_K, Q3_K or Q2_K (so the usual `Q8_0`, `Q6_K`, `Q5_K_M`, `Q4_K_M`, `Q3_K_M` and `Q2_K` files).
 
-Not yet: mixture-of-experts models, I-quants (`IQ*`), vision models, and other architectures (Gemma is Phoenix's
-job; `qwen35` is not supported yet). Windlass says so and refuses them at load.
+Mixture-of-experts GGUF files in the layouts llama.cpp writes (stacked `ffn_*_exps` tensors): Mixtral-style
+(`llama`, or `mixtral`, with `expert_count`), `qwen2moe` (adds the shared expert) and `qwen3moe` (QK norm, may keep
+some layers dense). The router is a softmax over all experts, the best `expert_used_count` run, and their weights are
+renormalised to sum to 1 for Mixtral and Qwen3-MoE but not for Qwen2-MoE (llama.cpp's `build_moe_ffn`; an
+`expert_weights_norm` key in the file wins). Only the chosen experts compute, which saves compute, not disk reads:
+a layer is still read whole, so RAM per layer slot is the size of all its experts and the disk-bound speed of a model
+bigger than RAM does not improve. `info` shows the experts per layer; `playbook probe` times one layer with the
+experts a token touches. Older files with one `ffn_gate.N.weight` tensor per expert are refused.
+
+MoE is **not parity-checked against llama.cpp** (there is no llama.cpp on the build machine): it is tested against a
+float reference written independently in `tests\MoeTests.cs`. Check a real small MoE file (for example
+Qwen3-30B-A3B) against llama.cpp's logits before relying on it.
+
+Not yet: I-quants (`IQ*`), vision models, and other architectures (Gemma is Phoenix's job; `qwen35` is not supported
+yet). Windlass says so and refuses them at load.
 
 ## Requirements
 

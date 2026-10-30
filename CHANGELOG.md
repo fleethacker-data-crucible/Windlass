@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Mixture-of-experts models: Mixtral-style (`llama`/`mixtral` with `expert_count`), `qwen2moe` (shared expert) and `qwen3moe`, from llama.cpp's stacked expert tensors. The router softmax, top-k and optional renormalisation follow `build_moe_ffn`; only the chosen experts compute, while a layer still streams every expert. `info` and `playbook probe` understand expert layers. Tested on tiny models against an independent float reference; not logit-checked against llama.cpp (needs a real MoE file).
 - `playbook eval`: quality score (perplexity on a built-in passage written for the test (so no model has memorised it)) and prompt seconds per token, kept in the playbook; `docs/SPEED-QUALITY.md` sets out free vs costly speed-ups and the planned speed/quality dial.
 - Guess-ahead (prompt-lookup speculation) for greedy replies: up to 8 guesses from text already in the conversation, checked in one pass; the reply is unchanged. The playbook turns it on or off from a measured batch cost and from how many guesses real runs kept (`--guess` / `--no-guess` override).
 - The playbook learns from real runs (tokens, seconds, guesses kept), reports them in `playbook show` and uses them at the next start.
