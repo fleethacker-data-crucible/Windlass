@@ -81,6 +81,7 @@ namespace Windlass
 
             float[] x = new float[(long)T * E];
             fixed (float* xp = x) for (int t = 0; t < T; t++) Stream.EmbedRow(_embd, tokens[t], xp + (long)t * E);
+            if (C.EmbeddingScale != 0f) for (long i = 0; i < x.Length; i++) x[i] *= C.EmbeddingScale;
 
             int total = C.Layers + 1;
             for (int l = 0; l < C.Layers; l++)
@@ -100,6 +101,7 @@ namespace Windlass
             WeightView output = head.Get("output.weight");
             float[] logits = new float[(long)n * output.Rows];
             MatMul(output, xn, n, logits);
+            if (C.LogitScale != 0f) { float inv = 1f / C.LogitScale; for (long i = 0; i < logits.Length; i++) logits[i] *= inv; }
             if (onStage != null) onStage(total, total);
             Length = pos0 + T;
             return logits;
@@ -108,8 +110,10 @@ namespace Windlass
         void Layer(Stage s, int l, float[] x, int T, int pos0)
         {
             int E = C.Embd, QD = C.QDim, KD = C.KvDim, HD = C.HeadDim;
+            float rs = C.ResidualScale != 0f ? C.ResidualScale : 1f;   // Granite scales each branch before the residual add
             float[] xn = new float[x.Length];
-            RmsNormRows(x, T, E, Vector(s.Get("attn_norm.weight")), C.RmsEps, xn);
+            if (C.PostNorms) Array.Copy(x, xn, x.Length);              // OLMo 2 has no pre-norm
+            else RmsNormRows(x, T, E, Vector(s.Get("attn_norm.weight")), C.RmsEps, xn);
 
             float[] q = new float[(long)T * QD], k = new float[(long)T * KD], v = new float[(long)T * KD];
             MatMul(s.Get("attn_q.weight"), xn, T, q);
@@ -118,7 +122,12 @@ namespace Windlass
             AddBias(s.Find("attn_q.bias"), q, T);
             AddBias(s.Find("attn_k.bias"), k, T);
             AddBias(s.Find("attn_v.bias"), v, T);
-            if (C.QkNorm)
+            if (C.QkNormFull)
+            {
+                RmsNormRows(q, T, QD, Vector(s.Get("attn_q_norm.weight")), C.RmsEps, q);
+                RmsNormRows(k, T, KD, Vector(s.Get("attn_k_norm.weight")), C.RmsEps, k);
+            }
+            else if (C.QkNorm)
             {
                 RmsNormRows(q, T * C.Heads, HD, Vector(s.Get("attn_q_norm.weight")), C.RmsEps, q);
                 RmsNormRows(k, T * C.KvHeads, HD, Vector(s.Get("attn_k_norm.weight")), C.RmsEps, k);
@@ -136,11 +145,14 @@ namespace Windlass
             Attention(l, q, T, pos0, att);
             float[] o = new float[(long)T * E];
             MatMul(s.Get("attn_output.weight"), att, T, o);
-            for (long i = 0; i < x.Length; i++) x[i] += o[i];
+            if (C.PostNorms) RmsNormRows(o, T, E, Vector(s.Get("post_attention_norm.weight")), C.RmsEps, o);
+            for (long i = 0; i < x.Length; i++) x[i] += o[i] * rs;
 
-            RmsNormRows(x, T, E, Vector(s.Get("ffn_norm.weight")), C.RmsEps, xn);
+            if (C.PostNorms) Array.Copy(x, xn, x.Length);
+            else RmsNormRows(x, T, E, Vector(s.Get("ffn_norm.weight")), C.RmsEps, xn);
             o = s.Find("ffn_gate_inp.weight") != null && C.Moe ? MoeFfn(s, xn, T) : Ffn(s, xn, T);
-            for (long i = 0; i < x.Length; i++) x[i] += o[i];
+            if (C.PostNorms) RmsNormRows(o, T, E, Vector(s.Get("post_ffw_norm.weight")), C.RmsEps, o);
+            for (long i = 0; i < x.Length; i++) x[i] += o[i] * rs;
         }
 
         // Dense SwiGLU feed-forward of one layer: down(silu(gate(x)) * up(x)). Returns [T][Embd].
@@ -260,7 +272,7 @@ namespace Windlass
         void Attention(int l, float[] q, int T, int pos0, float[] outp)
         {
             int H = C.Heads, HD = C.HeadDim, QD = C.QDim, KD = C.KvDim, group = C.Heads / C.KvHeads;
-            float scale = 1f / (float)Math.Sqrt(HD);
+            float scale = C.AttentionScale != 0f ? C.AttentionScale : 1f / (float)Math.Sqrt(HD);
             ushort[] K = _k[l], V = _v[l];
             float[] table = Half.Lookup;
             Parallel.For(0, T * H, Par, () => new float[pos0 + T], delegate(int job, ParallelLoopState st, float[] scores)

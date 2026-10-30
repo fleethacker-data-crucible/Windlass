@@ -7,7 +7,7 @@ namespace Windlass
 {
     public sealed class ModelConfig
     {
-        public static readonly string[] Architectures = { "llama", "qwen2", "qwen3", "mixtral", "qwen2moe", "qwen3moe" };
+        public static readonly string[] Architectures = { "llama", "qwen2", "qwen3", "mixtral", "qwen2moe", "qwen3moe", "granite", "olmo2" };
 
         public string Arch;
         public int Layers, Embd, Heads, KvHeads, HeadDim, Vocab, ContextLength, RopeDims;
@@ -15,6 +15,14 @@ namespace Windlass
         public bool RopeNeox;          // rotate (i, i + n/2) pairs instead of adjacent ones
         public bool QkNorm;            // Qwen3: RMSNorm on each Q and K head before RoPE
         public bool TiedEmbeddings;    // no output.weight: the head reuses token_embd
+        // Granite (llama graph plus four scalars, 0 = not set, as in llama.cpp): the embeddings are multiplied by
+        // EmbeddingScale, each residual branch by ResidualScale, attention scores use AttentionScale instead of
+        // 1/sqrt(head dim), and the logits are divided by LogitScale.
+        public float EmbeddingScale, ResidualScale, AttentionScale, LogitScale;
+        // OLMo 2: no norm before attention or the FFN; the attention and FFN outputs are normalised before the residual
+        // add, and Q and K are normalised over their whole vectors (not per head).
+        public bool PostNorms;
+        public bool QkNormFull;
         // Mixture of experts (llama.cpp build_moe_ffn): a router scores ExpertCount experts per token, the ExpertUsed best
         // run and their outputs are mixed. A layer is MoE when it has ffn_gate_inp.weight (Qwen3 may keep some dense).
         public int ExpertCount, ExpertUsed, ExpertFf, SharedExpertFf;
@@ -32,7 +40,7 @@ namespace Windlass
             ModelConfig c = new ModelConfig();
             c.Arch = g.GetString("general.architecture", "");
             if (Array.IndexOf(Architectures, c.Arch) < 0)
-                throw new NotSupportedException("Model architecture '" + c.Arch + "' is not supported. Windlass runs " + string.Join(", ", Architectures) + " (Llama 2/3, Mistral, Mixtral, Qwen2/2.5, Qwen3 dense; Qwen2-MoE and Qwen3-MoE).");
+                throw new NotSupportedException("Model architecture '" + c.Arch + "' is not supported. Windlass runs " + string.Join(", ", Architectures) + " (Llama 2/3, Mistral, Mixtral, Qwen2/2.5, Qwen3 dense; Qwen2-MoE and Qwen3-MoE; Granite 3 dense; OLMo 2).");
             string a = c.Arch + ".";
             c.Name = g.GetString("general.name", "");
             c.Layers = (int)g.GetInt(a + "block_count");
@@ -44,7 +52,16 @@ namespace Windlass
             c.ContextLength = (int)g.GetInt(a + "context_length", 4096);
             c.RmsEps = g.GetFloat(a + "attention.layer_norm_rms_epsilon", 1e-5f);
             c.RopeBase = g.GetFloat(a + "rope.freq_base", 10000f);
-            c.RopeNeox = c.Arch == "qwen2" || c.Arch == "qwen3" || c.Arch == "qwen2moe" || c.Arch == "qwen3moe";
+            c.RopeNeox = c.Arch == "qwen2" || c.Arch == "qwen3" || c.Arch == "qwen2moe" || c.Arch == "qwen3moe" || c.Arch == "olmo2";
+            if (c.Arch == "granite")
+            {
+                c.EmbeddingScale = g.GetFloat(a + "embedding_scale", 0f);
+                c.ResidualScale = g.GetFloat(a + "residual_scale", 0f);
+                c.AttentionScale = g.GetFloat(a + "attention.scale", 0f);
+                c.LogitScale = g.GetFloat(a + "logit_scale", 0f);
+            }
+            c.PostNorms = c.Arch == "olmo2";
+            c.QkNormFull = c.Arch == "olmo2";
             c.QkNorm = g.TensorsByName.ContainsKey("blk.0.attn_q_norm.weight");
             c.TiedEmbeddings = !g.TensorsByName.ContainsKey("output.weight");
 
@@ -77,11 +94,15 @@ namespace Windlass
             c.MoeLayers = new bool[c.Layers];
             for (int l = 0; l < c.Layers; l++)
             {
-                RequireLayer(g, l, RequiredLayerTensors);
+                RequireLayer(g, l, c.PostNorms ? Olmo2LayerTensors : RequiredLayerTensors);
                 c.MoeLayers[l] = c.ExpertCount > 0 && g.TensorsByName.ContainsKey("blk." + l + ".ffn_gate_inp.weight");
                 if (c.MoeLayers[l]) c.CheckMoeLayer(g, l);
                 else RequireLayer(g, l, DenseFfnTensors);
             }
+            if (c.QkNormFull)
+                for (int l = 0; l < c.Layers; l++)
+                    if (g.TensorsByName["blk." + l + ".attn_q_norm.weight"].ElementCount != c.QDim || g.TensorsByName["blk." + l + ".attn_k_norm.weight"].ElementCount != c.KvDim)
+                        throw new NotSupportedException("Layer " + l + ": attn_q_norm/attn_k_norm must cover the whole Q and K vectors (" + c.QDim + " and " + c.KvDim + ").");
             foreach (GgufTensor t in g.Tensors)
                 if (t.Name.EndsWith(".weight") && t.Dims.Length >= 2 && !Quants.CanDecode(t.Type))
                     throw new NotSupportedException("Tensor " + t.Name + " uses " + GgmlTypes.Name(t.Type) + ", which Windlass cannot decode yet. Use a Q8_0, Q6_K, Q5_K_M, Q4_K_M, Q3_K_M or Q2_K file.");
@@ -90,6 +111,8 @@ namespace Windlass
 
         // Every layer needs these; then either the dense feed-forward or, in MoE layers, the router and stacked experts.
         public static readonly string[] RequiredLayerTensors = { "attn_norm", "attn_q", "attn_k", "attn_v", "attn_output", "ffn_norm" };
+        // OLMo 2 has no attn_norm or ffn_norm; it norms the attention and FFN outputs and Q and K instead.
+        public static readonly string[] Olmo2LayerTensors = { "attn_q", "attn_k", "attn_v", "attn_output", "attn_q_norm", "attn_k_norm", "post_attention_norm", "post_ffw_norm" };
         public static readonly string[] DenseFfnTensors = { "ffn_gate", "ffn_up", "ffn_down" };
         public static readonly string[] MoeFfnTensors = { "ffn_gate_inp", "ffn_gate_exps", "ffn_up_exps", "ffn_down_exps" };
         public static readonly string[] SharedExpertTensors = { "ffn_gate_shexp", "ffn_up_shexp", "ffn_down_shexp" };

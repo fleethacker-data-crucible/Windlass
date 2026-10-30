@@ -337,15 +337,17 @@ namespace Windlass.Tests
 
         // The whole model in double precision from the decoded weights. Nothing here shares code with the engine except
         // the quantization decoders (which have their own llama.cpp parity tests) and the fp16 rounding of K and V.
-        sealed class Naive
+        internal sealed class Naive
         {
             readonly GgufModelFile _g;
             readonly MoeSpec _s;
             readonly Dictionary<string, float[]> _w = new Dictionary<string, float[]>();
 
-            public Naive(string path, MoeSpec s) { _g = GgufModelFile.Open(path); _s = s; }
+            public Naive(string path, MoeSpec s) { _g = GgufModelFile.Open(path); _s = s; }   // s may be null when only W() is used
 
             // Every element of a tensor decoded to float, row after row (experts stacked in file order).
+            internal GgufModelFile Header { get { return _g; } }
+
             public float[] W(string name)
             {
                 float[] f;
@@ -366,7 +368,7 @@ namespace Windlass.Tests
                 return f;
             }
 
-            static double[] RmsNorm(double[] x, float[] w)
+            internal static double[] RmsNorm(double[] x, float[] w)
             {
                 double ss = 0;
                 foreach (double v in x) ss += v * v;
@@ -377,7 +379,7 @@ namespace Windlass.Tests
             }
 
             // rows x cols matrix at element offset rowOffset * cols of w, times x.
-            static double[] MatVec(float[] w, long rowOffset, int rows, int cols, double[] x)
+            internal static double[] MatVec(float[] w, long rowOffset, int rows, int cols, double[] x)
             {
                 double[] y = new double[rows];
                 for (int r = 0; r < rows; r++)
@@ -390,7 +392,7 @@ namespace Windlass.Tests
                 return y;
             }
 
-            static double Silu(double a) { return a / (1.0 + Math.Exp(-a)); }
+            internal static double Silu(double a) { return a / (1.0 + Math.Exp(-a)); }
 
             static double[] SwiGlu(float[] gate, float[] up, float[] down, long offsetRows, int ff, int embd, double[] h)
             {
@@ -400,7 +402,7 @@ namespace Windlass.Tests
                 return MatVec(down, offsetRows * embd / ff, embd, ff, act);
             }
 
-            static double Fp16(double v) { return Half.ToFloat(Half.FromFloat((float)v)); }
+            internal static double Fp16(double v) { return Half.ToFloat(Half.FromFloat((float)v)); }
 
             public double[][] Forward(int[] toks)
             {
@@ -506,10 +508,10 @@ namespace Windlass.Tests
                 return y;
             }
 
-            static double[] Slice(double[] v, int at, int n) { double[] r = new double[n]; Array.Copy(v, at, r, 0, n); return r; }
+            internal static double[] Slice(double[] v, int at, int n) { double[] r = new double[n]; Array.Copy(v, at, r, 0, n); return r; }
 
             // Rotate one head of n values at position pos: pair (i, i + n/2) for NEOX, (2i, 2i + 1) otherwise.
-            static void Rope(double[] v, int at, int n, int pos, double baseFreq, bool neox)
+            internal static void Rope(double[] v, int at, int n, int pos, double baseFreq, bool neox)
             {
                 for (int i = 0; i < n / 2; i++)
                 {
