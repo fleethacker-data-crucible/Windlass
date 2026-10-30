@@ -23,6 +23,7 @@ namespace Windlass
 
         public readonly int MaxContext;
         public int Length { get; private set; } // positions held in the KV cache
+        public long ExpertRuns;                 // experts computed so far (MoE): a pass runs only the chosen ones, never all
 
         public Transformer(GgufModelFile g, ModelConfig c, LayerStream stream, int maxContext)
         {
@@ -138,14 +139,116 @@ namespace Windlass
             for (long i = 0; i < x.Length; i++) x[i] += o[i];
 
             RmsNormRows(x, T, E, Vector(s.Get("ffn_norm.weight")), C.RmsEps, xn);
-            WeightView gate = s.Get("ffn_gate.weight");
+            o = s.Find("ffn_gate_inp.weight") != null && C.Moe ? MoeFfn(s, xn, T) : Ffn(s, xn, T);
+            for (long i = 0; i < x.Length; i++) x[i] += o[i];
+        }
+
+        // Dense SwiGLU feed-forward of one layer: down(silu(gate(x)) * up(x)). Returns [T][Embd].
+        float[] Ffn(Stage s, float[] xn, int T)
+        {
+            return SwiGlu(s.Get("ffn_gate.weight"), s.Get("ffn_up.weight"), s.Get("ffn_down.weight"), xn, T);
+        }
+
+        // down(silu(gate(x)) * up(x)) for T rows of x with any gate/up/down matrices (a layer's, a shared expert's or one expert's).
+        static float[] SwiGlu(WeightView gate, WeightView up, WeightView down, float[] xn, int T)
+        {
             int F = gate.Rows;
             float[] g = new float[(long)T * F], u = new float[(long)T * F];
             MatMul(gate, xn, T, g);
-            MatMul(s.Get("ffn_up.weight"), xn, T, u);
+            MatMul(up, xn, T, u);
             for (long i = 0; i < g.Length; i++) { float a = g[i]; g[i] = a / (1f + (float)Math.Exp(-a)) * u[i]; }
-            MatMul(s.Get("ffn_down.weight"), g, T, o);
-            for (long i = 0; i < x.Length; i++) x[i] += o[i];
+            float[] o = new float[(long)T * down.Rows];
+            MatMul(down, g, T, o);
+            return o;
+        }
+
+        const float MinExpertWeightSum = 6.103515625e-5f;   // llama.cpp clamps the renormalising sum at the smallest fp16 normal
+
+        // Mixture-of-experts feed-forward, following llama.cpp's build_moe_ffn: softmax over the router logits, the top
+        // ExpertUsed experts per token, optionally renormalise their weights to sum to 1, then the weighted sum of the
+        // chosen experts' SwiGLU outputs. Only the chosen experts compute (the stage still holds all of them in RAM).
+        // Qwen2-MoE adds a shared expert scaled by sigmoid(ffn_gate_inp_shexp . x). Returns [T][Embd].
+        float[] MoeFfn(Stage s, float[] xn, int T)
+        {
+            int E = C.Embd, NE = C.ExpertCount, K = C.ExpertUsed;
+            float[] logits = new float[(long)T * NE];
+            MatMul(s.Get("ffn_gate_inp.weight"), xn, T, logits);
+            int[] sel = new int[(long)T * K];
+            float[] wts = new float[(long)T * K];
+            int[] count = new int[NE];               // tokens routed to each expert
+            for (int t = 0; t < T; t++) Route(logits, (long)t * NE, NE, K, C.ExpertWeightsNorm, sel, wts, (long)t * K, count);
+
+            float[] outp = new float[(long)T * E];
+            WeightView gate = s.Get("ffn_gate_exps.weight"), up = s.Get("ffn_up_exps.weight"), down = s.Get("ffn_down_exps.weight");
+            for (int e = 0; e < NE; e++)
+            {
+                int n = count[e];
+                if (n == 0) continue;
+                int[] toks = new int[n];
+                float[] w = new float[n];
+                float[] xe = new float[(long)n * E];
+                int at = 0;
+                for (int t = 0; t < T; t++)
+                    for (int j = 0; j < K; j++)
+                        if (sel[(long)t * K + j] == e)
+                        {
+                            toks[at] = t; w[at] = wts[(long)t * K + j];
+                            Array.Copy(xn, (long)t * E, xe, (long)at * E, E);
+                            at++;
+                        }
+                ExpertRuns++;
+                float[] ye = SwiGlu(gate.Slice(e), up.Slice(e), down.Slice(e), xe, n);
+                for (int i = 0; i < n; i++)
+                {
+                    long o = (long)toks[i] * E, r = (long)i * E;
+                    for (int d = 0; d < E; d++) outp[o + d] += w[i] * ye[r + d];
+                }
+            }
+
+            WeightView sgate = s.Find("ffn_gate_shexp.weight");
+            if (sgate != null)
+            {
+                float[] sh = SwiGlu(sgate, s.Get("ffn_up_shexp.weight"), s.Get("ffn_down_shexp.weight"), xn, T);
+                WeightView sg = s.Find("ffn_gate_inp_shexp.weight");
+                float[] gl = null;
+                if (sg != null) { gl = new float[T]; MatMul(sg, xn, T, gl); }
+                for (int t = 0; t < T; t++)
+                {
+                    float f = gl == null ? 1f : 1f / (1f + (float)Math.Exp(-gl[t]));
+                    long o = (long)t * E;
+                    for (int d = 0; d < E; d++) outp[o + d] += f * sh[o + d];
+                }
+            }
+            return outp;
+        }
+
+        // One token's routing: softmax over n router logits at logits[at..], the k largest (ties go to the lower expert),
+        // their probabilities (renormalised when asked) into wts[wat..], their ids into sel[wat..]; count[e]++ per pick.
+        public static void Route(float[] logits, long at, int n, int k, bool renorm, int[] sel, float[] wts, long wat, int[] count)
+        {
+            float max = float.NegativeInfinity;
+            for (int i = 0; i < n; i++) if (logits[at + i] > max) max = logits[at + i];
+            float[] p = new float[n];
+            double sum = 0;
+            for (int i = 0; i < n; i++) { p[i] = (float)Math.Exp(logits[at + i] - max); sum += p[i]; }
+            float inv = (float)(1.0 / sum);
+            for (int i = 0; i < n; i++) p[i] *= inv;
+            bool[] taken = new bool[n];
+            float chosen = 0;
+            for (int j = 0; j < k; j++)
+            {
+                int best = -1;
+                for (int i = 0; i < n; i++) if (!taken[i] && (best < 0 || p[i] > p[best])) best = i;
+                taken[best] = true;
+                sel[wat + j] = best; wts[wat + j] = p[best];
+                chosen += p[best];
+                count[best]++;
+            }
+            if (renorm)
+            {
+                float div = Math.Max(chosen, MinExpertWeightSum);
+                for (int j = 0; j < k; j++) wts[wat + j] /= div;
+            }
         }
 
         static void ToHalf(float[] src, ushort[] dst, long at, long n)
