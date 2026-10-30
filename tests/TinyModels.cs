@@ -321,8 +321,22 @@ namespace Windlass.Tests
                 case GgmlType.Q2_K: return new int[] { 80, 82 };
                 case GgmlType.Q3_K: return new int[] { 108 };
                 case GgmlType.Q6_K: return new int[] { 208 };
+                case GgmlType.IQ4_NL: case GgmlType.IQ4_XS: case GgmlType.IQ3_XXS: case GgmlType.IQ3_S:
+                case GgmlType.IQ2_XXS: case GgmlType.IQ2_XS: case GgmlType.IQ2_S: case GgmlType.IQ1_S: return new int[] { 0 };
+                case GgmlType.IQ1_M: return new int[0];   // no d field: PutScale spreads the fp16 over the scale words
             }
             return null;
+        }
+
+        // Writes the fp16 scale h into every scale field of the block at o. IQ1_M keeps it in the top nibbles of its four scale words (offset 48).
+        static void PutScale(byte[] data, int o, GgmlType t, int[] fields, ushort h)
+        {
+            if (t == GgmlType.IQ1_M)
+            {
+                for (int k = 0; k < 4; k++) data[o + 48 + 2 * k + 1] = (byte)((data[o + 48 + 2 * k + 1] & 0x0F) | (((h >> (4 * k)) & 0xF) << 4));
+                return;
+            }
+            foreach (int f in fields) { data[o + f] = (byte)h; data[o + f + 1] = (byte)(h >> 8); }
         }
 
         // A random rows x cols matrix with element RMS about `rms`. Float types are drawn directly; quantized types get
@@ -354,14 +368,14 @@ namespace Windlass.Tests
             for (int b = 0; b < blocks; b++)
             {
                 int o = b * typeSize;
-                foreach (int f in fields) { ushort one = Half.FromFloat(1f); data[o + f] = (byte)one; data[o + f + 1] = (byte)(one >> 8); }
+                PutScale(data, o, t, fields, Half.FromFloat(1f));
                 double sum = 0;
                 fixed (byte* p = data) fixed (float* d = tmp) Quants.DecodeRow(t, p + o, blockSize, d);
                 foreach (float v in tmp) sum += v * v;
                 float scale = (float)(rms / Math.Sqrt(Math.Max(sum / blockSize, 1e-12)));
                 // Spread the scales a little so blocks differ.
                 scale *= (float)(0.75 + 0.5 * rng.Uniform());
-                foreach (int f in fields) { ushort h = Half.FromFloat(scale); data[o + f] = (byte)h; data[o + f + 1] = (byte)(h >> 8); }
+                PutScale(data, o, t, fields, Half.FromFloat(scale));
             }
             return data;
         }

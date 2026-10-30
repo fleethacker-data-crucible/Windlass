@@ -17,7 +17,7 @@ namespace Windlass
                 case GgmlType.Q2_K: case GgmlType.Q3_K: case GgmlType.Q4_K: case GgmlType.Q5_K: case GgmlType.Q6_K:
                     return true;
             }
-            return false;
+            return IQuants.Handles(t);
         }
 
         public static float Bf16(ushort v)
@@ -47,6 +47,7 @@ namespace Windlass
                 case GgmlType.Q5_K: Q5_K(src, n, dst); return;
                 case GgmlType.Q6_K: Q6_K(src, n, dst); return;
             }
+            if (IQuants.Handles(t)) { IQuants.DecodeRow(t, src, n, dst); return; }
             throw new NotSupportedException("Windlass cannot decode " + GgmlTypes.Name(t) + " weights yet.");
         }
 

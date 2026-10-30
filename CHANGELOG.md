@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- I-quants: IQ4_NL, IQ4_XS, IQ3_XXS, IQ3_S, IQ2_XXS, IQ2_XS, IQ2_S, IQ1_S and IQ1_M weights now load and run (`src/IQuants.cs`, `src/IqTables.cs`; before, `ModelConfig` refused them). Reference ports of llama.cpp's `dequantize_row_iq*`, tested against an independent re-derivation and for identical streamed, prefetched and resident logits on tiny models; not yet logit-checked against llama.cpp (needs a real IQ model and llama.cpp, for Anthony). No fused dot: single tokens decode a row then dot it. Speed unmeasured.
 - `playbook eval`: quality score (perplexity on a built-in passage written for the test (so no model has memorised it)) and prompt seconds per token, kept in the playbook; `docs/SPEED-QUALITY.md` sets out free vs costly speed-ups and the planned speed/quality dial.
 - Guess-ahead (prompt-lookup speculation) for greedy replies: up to 8 guesses from text already in the conversation, checked in one pass; the reply is unchanged. The playbook turns it on or off from a measured batch cost and from how many guesses real runs kept (`--guess` / `--no-guess` override).
 - The playbook learns from real runs (tokens, seconds, guesses kept), reports them in `playbook show` and uses them at the next start.

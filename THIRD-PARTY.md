@@ -7,14 +7,14 @@ Windlass ships no third-party code at run time: no packages, no DLLs. The source
 - Project: [llama.cpp](https://github.com/ggml-org/llama.cpp), Copyright (c) 2023-2026 The ggml authors
 - Licence: MIT (full text in [LICENSES/llama.cpp-MIT.txt](LICENSES/llama.cpp-MIT.txt))
 
-Ported from it: the GGUF format reader (`src/Gguf.cs`, after `gguf.md`), the weight decoders (`src/Quants.cs`, after the `dequantize_row_*` reference functions in `ggml-quants.c`; the fused dot kernels follow the same layouts), the tokenizers (`src/Tokenizer.cs`, after `llm_tokenizer_bpe` and `llm_tokenizer_spm` in `llama-vocab.cpp`, including the pre-tokenizer regexes), the model hyperparameter keys (`src/ModelConfig.cs`), the forward pass layout (`src/Transformer.cs`, after `llm_build_llama`, `llm_build_qwen2` and `llm_build_qwen3`) and the built-in chat templates (`src/ChatTemplate.cs`). The test fixture `tests/fixtures/llama-cpp-reference.txt` holds outputs computed with llama.cpp (through llama-cpp-python 0.3.36 on a development machine).
+Ported from it: the GGUF format reader (`src/Gguf.cs`, after `gguf.md`), the weight decoders (`src/Quants.cs`, after the `dequantize_row_*` reference functions in `ggml-quants.c`; the fused dot kernels follow the same layouts), the I-quant decoders (`src/IQuants.cs`, after `dequantize_row_iq*` in `ggml-quants.c`) and their lookup tables (`src/IqTables.cs`, the `iq*_grid`, `ksigns_iq2xs`, `kmask_iq2xs` and `kvalues_iq4nl` tables of `ggml-common.h`), the tokenizers (`src/Tokenizer.cs`, after `llm_tokenizer_bpe` and `llm_tokenizer_spm` in `llama-vocab.cpp`, including the pre-tokenizer regexes), the model hyperparameter keys (`src/ModelConfig.cs`), the forward pass layout (`src/Transformer.cs`, after `llm_build_llama`, `llm_build_qwen2` and `llm_build_qwen3`) and the built-in chat templates (`src/ChatTemplate.cs`). The test fixture `tests/fixtures/llama-cpp-reference.txt` holds outputs computed with llama.cpp (through llama-cpp-python 0.3.36 on a development machine).
 
 ## Phoenix LAI
 
 - Project: [Phoenix LAI](https://github.com/fleethacker-data-crucible/phoenix-lai), Copyright (c) 2026 Jeremy Gerdes and contributors
 - Licence: MIT
 
-Taken from it: `src/Half.cs` and `src/Json.cs` (unchanged apart from the namespace and integer output), and the byte-level BPE part of `src/Tokenizer.cs`.
+Taken from it: `src/Half.cs` and `src/Json.cs` (unchanged apart from the namespace and integer output), and the byte-level BPE part of `src/Tokenizer.cs`. The IQ2_XXS, IQ2_S and IQ3_S grids in `src/IqTables.cs` come from Phoenix's `src/IqTables.cs`; the IQ2_XS, IQ3_XXS and IQ1_S grids were read from the ggml data of a compiled llama.cpp (the `ggml-base.dll` that ships with Ollama) and agree with it byte for byte where the two overlap.
 
 ## FleetHacker edge-ops
 

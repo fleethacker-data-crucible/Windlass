@@ -43,6 +43,12 @@ namespace Windlass.Tests
                 Add(tests, "engine: logits match llama.cpp for every weight type and architecture", LogitsMatchLlamaCpp);
                 Add(tests, "engine: streamed, prefetched and resident layers give identical logits", StreamingIsExact);
                 Add(tests, "engine: KV cache (one token at a time) matches a full pass", KvCacheMatchesFullPass);
+                Add(tests, "quants: iquant tables are the ggml-common.h data", IQuantTests.Tables);
+                Add(tests, "quants: iquant decoders match an independent re-derivation of ggml-quants.c", IQuantTests.Decoders);
+                Add(tests, "quants: iquant block, row and tensor sizes", IQuantTests.Sizes);
+                Add(tests, "quants: iquant weights work through the generic decode-then-dot matmul", IQuantTests.MatMul);
+                Add(tests, "engine: iquant models load and streamed, prefetched and resident logits are identical", IQuantTests.Streaming);
+                Add(tests, "engine: iquant KV cache (one token at a time) matches a full pass", IQuantTests.KvCache);
                 Add(tests, "engine: generation is deterministic and reuses the cached prompt prefix", GenerationAndPrefixReuse);
                 Add(tests, "engine: stop sequences, max_tokens and context limit", GenerationLimits);
                 Add(tests, "engine: guess-ahead keeps the same greedy reply and keeps right guesses", GuessAheadIsExact);
