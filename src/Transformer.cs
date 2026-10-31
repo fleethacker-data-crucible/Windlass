@@ -13,9 +13,8 @@ namespace Windlass
         public readonly LayerStream Stream;
         readonly GgufTensor _embd;
         readonly float[] _ropeFreqs;            // rope_freqs.weight (Llama 3.1+ long-context factors), or null
-        readonly ushort[][] _k, _v;             // per layer: [position][KvDim], fp16 like llama.cpp's default KV cache
+        readonly Sequence _own;                 // the KV cache Forward uses: per layer [position][KvDim], fp16 like llama.cpp's default
         readonly float[][] _rope;               // per position: cos/sin pairs, computed once (the same for every layer)
-        int _capacity;
 
         // Worker threads for the matrix and attention loops (0 = every logical core). Set from the machine playbook.
         public static int Threads;
@@ -25,8 +24,8 @@ namespace Windlass
         static ParallelOptions Par { get { ParallelOptions o = new ParallelOptions(); o.MaxDegreeOfParallelism = Threads > 0 ? Threads : -1; return o; } }
 
         public readonly int MaxContext;
-        public int Length { get; private set; } // positions held in the KV cache
         public long ExpertRuns;                 // experts computed so far (MoE): a pass runs only the chosen ones, never all
+        public int Length { get { return _own.Length; } } // positions held in the KV cache
 
         public Transformer(GgufModelFile g, ModelConfig c, LayerStream stream, int maxContext)
         {
@@ -36,8 +35,7 @@ namespace Windlass
             _embd = g.TensorsByName["token_embd.weight"];
             GgufTensor rf;
             if (g.TensorsByName.TryGetValue("rope_freqs.weight", out rf)) _ropeFreqs = ReadVector(g, rf);
-            _k = new ushort[c.Layers][];
-            _v = new ushort[c.Layers][];
+            _own = new Sequence(c.Layers);
             _rope = new float[maxContext][];
         }
 
@@ -56,31 +54,40 @@ namespace Windlass
         }
 
         // Drops cached positions from n onward (the cache keeps a shared prompt prefix between requests).
-        public void Truncate(int n) { if (n < Length) Length = Math.Max(0, n); }
+        public void Truncate(int n) { _own.Truncate(n); }
 
-        void Reserve(int positions)
+        // An empty KV cache of its own, for ForwardBatch (--batch): one per request that generates at the same time.
+        public Sequence NewSequence() { return new Sequence(C.Layers); }
+
+        void Reserve(Sequence sq, int positions)
         {
-            if (positions <= _capacity) return;
-            int cap = Math.Max(positions, Math.Min(MaxContext, Math.Max(256, _capacity * 2)));
+            if (positions <= sq.Capacity) return;
+            int cap = Math.Max(positions, Math.Min(MaxContext, Math.Max(256, sq.Capacity * 2)));
             for (int l = 0; l < C.Layers; l++)
             {
                 ushort[] nk = new ushort[(long)cap * C.KvDim], nv = new ushort[(long)cap * C.KvDim];
-                if (_k[l] != null) { Array.Copy(_k[l], nk, (long)Length * C.KvDim); Array.Copy(_v[l], nv, (long)Length * C.KvDim); }
-                _k[l] = nk; _v[l] = nv;
+                if (sq.K[l] != null) { Array.Copy(sq.K[l], nk, (long)sq.Length * C.KvDim); Array.Copy(sq.V[l], nv, (long)sq.Length * C.KvDim); }
+                sq.K[l] = nk; sq.V[l] = nv;
             }
-            _capacity = cap;
+            sq.Capacity = cap;
         }
 
         // Runs tokens at positions pos0.. through every stage. Returns logits for the last token, or for every token
         // when allLogits is set ([T][Vocab] flattened). onStage(done, total) reports progress; cancel stops between stages.
         public float[] Forward(int[] tokens, int pos0, bool allLogits, CancellationToken cancel, Action<int, int> onStage)
         {
+            return Forward(_own, tokens, pos0, allLogits, cancel, onStage);
+        }
+
+        // The same on one sequence's own KV cache (see NewSequence).
+        public float[] Forward(Sequence sq, int[] tokens, int pos0, bool allLogits, CancellationToken cancel, Action<int, int> onStage)
+        {
             int T = tokens.Length, E = C.Embd;
             if (T == 0) throw new ArgumentException("No tokens to run.");
-            if (pos0 > Length) throw new ArgumentException("pos0 is past the cached positions.");
+            if (pos0 > sq.Length) throw new ArgumentException("pos0 is past the cached positions.");
             if (pos0 + T > MaxContext) throw new ArgumentException("The prompt and reply need " + (pos0 + T) + " positions; the context is " + MaxContext + ".");
-            Length = pos0;
-            Reserve(pos0 + T);
+            sq.Length = pos0;
+            Reserve(sq, pos0 + T);
 
             float[] x = new float[(long)T * E];
             fixed (float* xp = x) for (int t = 0; t < T; t++) Stream.EmbedRow(_embd, tokens[t], xp + (long)t * E);
@@ -91,12 +98,21 @@ namespace Windlass
             {
                 cancel.ThrowIfCancellationRequested();
                 Stage s = Stream.Acquire(l);
-                Layer(s, l, x, T, pos0);
+                Layer(s, l, x, T, pos0, sq, null);
                 if (onStage != null) onStage(l + 1, total);
             }
             cancel.ThrowIfCancellationRequested();
+            float[] logits = Head(x, T, allLogits ? 0 : T - 1);
+            if (onStage != null) onStage(total, total);
+            sq.Length = pos0 + T;
+            return logits;
+        }
+
+        // Final norm and output head for rows first..T-1 of x.
+        float[] Head(float[] x, int T, int first)
+        {
+            int E = C.Embd, n = T - first;
             Stage head = Stream.Acquire(Stream.HeadStage);
-            int first = allLogits ? 0 : T - 1, n = T - first;
             float[] last = new float[(long)n * E];
             Array.Copy(x, (long)first * E, last, 0, (long)n * E);
             float[] xn = new float[last.Length];
@@ -105,12 +121,60 @@ namespace Windlass
             float[] logits = new float[(long)n * output.Rows];
             MatMul(output, xn, n, logits);
             if (C.LogitScale != 0f) { float inv = 1f / C.LogitScale; for (long i = 0; i < logits.Length; i++) logits[i] *= inv; }
-            if (onStage != null) onStage(total, total);
-            Length = pos0 + T;
             return logits;
         }
 
-        void Layer(Stage s, int l, float[] x, int T, int pos0)
+        // One decode step for several sequences at once: token i is the next token of seqs[i], at position
+        // seqs[i].Length. The N tokens are stacked into ONE pass, so every layer's weights are read and decoded
+        // once for all of them; attention runs per sequence on that sequence's own KV cache. Every other operation
+        // works row by row, and the matrices use the single-token kernels for every row (see EachToken), so row i of
+        // the result is bit-identical to Forward(seqs[i], new int[] { tokens[i] }, ...). Returns [N][Vocab] logits.
+        public float[] ForwardBatch(Sequence[] seqs, int[] tokens, CancellationToken cancel, Action<int, int> onStage)
+        {
+            int N = tokens.Length, E = C.Embd;
+            if (N == 0 || seqs.Length != N) throw new ArgumentException("ForwardBatch needs one token for each sequence.");
+            BatchRows br = new BatchRows();
+            br.Seq = seqs; br.Pos = new int[N];
+            for (int i = 0; i < N; i++)
+            {
+                Sequence sq = seqs[i];
+                for (int j = 0; j < i; j++) if (seqs[j] == sq) throw new ArgumentException("A sequence can take one token per batch step.");
+                int pos = sq.Length;
+                if (pos + 1 > MaxContext) throw new ArgumentException("The prompt and reply need " + (pos + 1) + " positions; the context is " + MaxContext + ".");
+                br.Pos[i] = pos;
+                if (pos + 1 > br.MaxN) br.MaxN = pos + 1;
+                Reserve(sq, pos + 1);
+            }
+            float[] x = new float[(long)N * E];
+            fixed (float* xp = x) for (int t = 0; t < N; t++) Stream.EmbedRow(_embd, tokens[t], xp + (long)t * E);
+            if (C.EmbeddingScale != 0f) for (long i = 0; i < x.Length; i++) x[i] *= C.EmbeddingScale;
+
+            int total = C.Layers + 1;
+            EachToken = true;
+            try
+            {
+                for (int l = 0; l < C.Layers; l++)
+                {
+                    cancel.ThrowIfCancellationRequested();
+                    Stage s = Stream.Acquire(l);
+                    Layer(s, l, x, N, 0, null, br);
+                    if (onStage != null) onStage(l + 1, total);
+                }
+                cancel.ThrowIfCancellationRequested();
+                float[] logits = Head(x, N, 0);
+                if (onStage != null) onStage(total, total);
+                for (int i = 0; i < N; i++) seqs[i].Length = br.Pos[i] + 1;
+                return logits;
+            }
+            finally { EachToken = false; }
+        }
+
+        // Rows of a batch step: row t belongs to Seq[t] at position Pos[t]; MaxN is the longest history plus one.
+        sealed class BatchRows { public Sequence[] Seq; public int[] Pos; public int MaxN; }
+
+        // br == null: T tokens of the sequence sq from position pos0 (a prompt or a few guesses). Otherwise a batch step:
+        // T rows, each the next token of its own sequence (sq and pos0 are unused).
+        void Layer(Stage s, int l, float[] x, int T, int pos0, Sequence sq, BatchRows br)
         {
             int E = C.Embd, QD = C.QDim, KD = C.KvDim, HD = C.HeadDim;
             float rs = C.ResidualScale != 0f ? C.ResidualScale : 1f;   // Granite scales each branch before the residual add
@@ -137,15 +201,24 @@ namespace Windlass
             }
             for (int t = 0; t < T; t++)
             {
-                float[] cs = RopeTable(pos0 + t);
+                float[] cs = RopeTable(br == null ? pos0 + t : br.Pos[t]);
                 Rope(q, (long)t * QD, C.Heads, cs);
                 Rope(k, (long)t * KD, C.KvHeads, cs);
             }
-            ToHalf(k, _k[l], (long)pos0 * KD, (long)T * KD);
-            ToHalf(v, _v[l], (long)pos0 * KD, (long)T * KD);
+            if (br == null)
+            {
+                ToHalf(k, sq.K[l], (long)pos0 * KD, (long)T * KD);
+                ToHalf(v, sq.V[l], (long)pos0 * KD, (long)T * KD);
+            }
+            else
+                for (int t = 0; t < T; t++)
+                {
+                    ToHalf(k, (long)t * KD, br.Seq[t].K[l], (long)br.Pos[t] * KD, KD);
+                    ToHalf(v, (long)t * KD, br.Seq[t].V[l], (long)br.Pos[t] * KD, KD);
+                }
 
             float[] att = new float[(long)T * QD];
-            Attention(l, q, T, pos0, att);
+            Attention(sq, br, l, q, T, pos0, att);
             float[] o = new float[(long)T * E];
             MatMul(s.Get("attn_output.weight"), att, T, o);
             if (C.PostNorms) RmsNormRows(o, T, E, Vector(s.Get("post_attention_norm.weight")), C.RmsEps, o);
@@ -266,21 +339,26 @@ namespace Windlass
             }
         }
 
-        static void ToHalf(float[] src, ushort[] dst, long at, long n)
+        static void ToHalf(float[] src, ushort[] dst, long at, long n) { ToHalf(src, 0, dst, at, n); }
+
+        static void ToHalf(float[] src, long from, ushort[] dst, long at, long n)
         {
             fixed (float* s = src) fixed (ushort* d = dst)
-                for (long i = 0; i < n; i++) d[at + i] = Half.FromFloat(s[i]);
+                for (long i = 0; i < n; i++) d[at + i] = Half.FromFloat(s[from + i]);
         }
 
-        void Attention(int l, float[] q, int T, int pos0, float[] outp)
+        // Row t of a batch attends to its own sequence's positions 0..Pos[t]; otherwise to sq's, through pos0 + t.
+        void Attention(Sequence sq, BatchRows br, int l, float[] q, int T, int pos0, float[] outp)
         {
             int H = C.Heads, HD = C.HeadDim, QD = C.QDim, KD = C.KvDim, group = C.Heads / C.KvHeads;
             float scale = C.AttentionScale != 0f ? C.AttentionScale : 1f / (float)Math.Sqrt(HD);
-            ushort[] K = _k[l], V = _v[l];
             float[] table = Half.Lookup;
-            Parallel.For(0, T * H, Par, () => new float[pos0 + T], delegate(int job, ParallelLoopState st, float[] scores)
+            int scratch = br == null ? pos0 + T : br.MaxN;
+            Parallel.For(0, T * H, Par, () => new float[scratch], delegate(int job, ParallelLoopState st, float[] scores)
             {
-                int t = job / H, h = job % H, n = pos0 + t + 1, kvh = h / group;
+                int t = job / H, h = job % H, kvh = h / group;
+                int n = br == null ? pos0 + t + 1 : br.Pos[t] + 1;
+                ushort[] K = br == null ? sq.K[l] : br.Seq[t].K[l], V = br == null ? sq.V[l] : br.Seq[t].V[l];
                 fixed (float* qp0 = q) fixed (ushort* Kp = K) fixed (ushort* Vp = V) fixed (float* op0 = outp) fixed (float* sp = scores) fixed (float* tab = table)
                 {
                     float* qp = qp0 + (long)t * QD + h * HD;
@@ -406,6 +484,7 @@ namespace Windlass
         {
             int rows = w.Rows, cols = w.Cols;
             if ((long)cols * T != x.Length || (long)rows * T > y.Length) throw new ArgumentException("MatMul shape mismatch for " + w.Name + ".");
+            if (EachToken && T > 1 && Quants.CanDot(w.Type)) { MatMulEach(w, x, T, y); return; }
             IntPtr basePtr = (IntPtr)w.Data;
             long rowBytes = w.RowBytes;
             GgmlType type = w.Type;
@@ -454,6 +533,30 @@ namespace Windlass
                 }
                 return scratch;
             }, delegate(float[] scratch) { });
+        }
+
+        // Set while a batch step runs (on that thread): T > 1 rows are then multiplied one at a time with the single-token
+        // kernel, so a row of a batch gives the same bits as that token run alone. The weights are still read and
+        // streamed once for all rows; each tile of weight rows stays in cache while every row is multiplied with it.
+        [ThreadStatic] static bool EachToken;
+
+        static void MatMulEach(WeightView w, float[] x, int T, float[] y)
+        {
+            int rows = w.Rows, cols = w.Cols;
+            IntPtr basePtr = (IntPtr)w.Data;
+            long rowBytes = w.RowBytes;
+            GgmlType type = w.Type;
+            int tiles = (rows + RowTile - 1) / RowTile;
+            Parallel.For(0, tiles, Par, delegate(int tile)
+            {
+                int r0 = tile * RowTile, r1 = Math.Min(rows, r0 + RowTile);
+                fixed (float* xp = x) fixed (float* yp = y)
+                    for (int r = r0; r < r1; r++)
+                    {
+                        byte* row = (byte*)basePtr + r * rowBytes;
+                        for (int t = 0; t < T; t++) yp[(long)t * rows + r] = Quants.DotRow(type, row, xp + (long)t * cols, cols);
+                    }
+            });
         }
 
         public void Dispose() { }

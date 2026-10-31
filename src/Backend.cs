@@ -43,6 +43,9 @@ namespace Windlass
         // Blocking; the server calls it on a background thread.
         public abstract void Load();
 
+        // How many Generate calls may run at the same time (the server grants that many turns before it queues).
+        public virtual int MaxConcurrent { get { return 1; } }
+
         // Blocking. onText gets each new piece of text; onStage(done, total) reports layer progress.
         public abstract GenerationResult Generate(GenerationRequest request, Action<string> onText, Action<int, int> onStage, CancellationToken cancel);
 

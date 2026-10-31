@@ -49,6 +49,8 @@ Options:
   --no-playbook           ignore the playbook; use the defaults and the options given
   --no-auto-stop          do not stop when the programs that sent heartbeats are gone (or set WINDLASS_AUTO_STOP=0)
   --guess / --no-guess    guess-ahead for greedy replies on or off (default: the playbook's choice, else off)
+  --batch <n>             serve: let up to n requests generate together, one pass over the layers per step for all
+                          of them (default 1 = one at a time). Each adds a KV cache; guess-ahead is off
   --chat-template <name>  llama3, chatml, mistral, mistral-v7 or llama2 (default: detected)
   --max-tokens <n>        max_tokens for requests that give none (default 1024)
   --max-queue <n>         requests that may wait behind the running one (default 8)
@@ -172,10 +174,46 @@ Options:
             if (o.ContainsKey("threads")) e.Threads = Int(o, "threads", 0, 1, 4096);
             if (o.ContainsKey("guess")) e.Speculate = true;
             if (o.ContainsKey("no-guess")) e.Speculate = false;
+            if (o.ContainsKey("batch")) e.Batch = Int(o, "batch", 1, 1, BatchPlan.MaxBatch);
+            if (e.Batch > 1) ApplyBatch(e, o);
             if (o.ContainsKey("int-dot")) e.IntDot = true;
-            if (e.Playbook != null && (o.ContainsKey("no-prefetch") || o.ContainsKey("context-length") || o.ContainsKey("cache-gb") || o.ContainsKey("threads") || o.ContainsKey("guess") || o.ContainsKey("no-guess")))
+            if (e.Playbook != null && (o.ContainsKey("no-prefetch") || o.ContainsKey("context-length") || o.ContainsKey("cache-gb") || o.ContainsKey("threads") || o.ContainsKey("guess") || o.ContainsKey("no-guess") || o.ContainsKey("batch")))
                 e.Playbook.Rules.Add("Options given on the command line override the playbook where they differ.");
             return e;
+        }
+
+        // --batch N: N KV caches share the quarter of the RAM budget that the playbook gives one. A context the playbook
+        // chose is halved until they fit; one given by hand is refused instead. Guess-ahead is for batch 1 only.
+        static void ApplyBatch(EngineOptions e, Dictionary<string, string> o)
+        {
+            GgufModelFile g = GgufModelFile.Open(e.ModelPath);
+            ModelConfig c = ModelConfig.From(g);
+            MachineFacts m = e.Machine ?? MachineFacts.Detect();
+            int ctx = e.ContextLength > 0 ? e.ContextLength : Math.Min(c.ContextLength, EngineOptions.DefaultContext);
+            if (e.Playbook != null && !o.ContainsKey("context-length"))
+            {
+                int fit = BatchPlan.FitContext(c, ctx, e.Batch, m, Playbook.MinContext);
+                if (fit != ctx)
+                {
+                    e.Playbook.Rules.Add("--batch " + e.Batch + ": context " + fit + " tokens (not " + ctx + ") so " + e.Batch + " KV caches fit.");
+                    ctx = fit;
+                    e.ContextLength = fit;
+                }
+            }
+            string why = BatchPlan.Check(c, ctx, e.Batch, m);
+            if (why != null) throw new ArgumentException(why);
+            if (e.Playbook != null)
+            {
+                long extra = BatchPlan.KvBytes(c, ctx, e.Batch - 1);   // the caches the playbook did not budget for
+                e.CacheBytes = Math.Max(0, e.CacheBytes - extra);
+                e.Playbook.Rules.Add("--batch " + e.Batch + ": " + (extra / 1e9).ToString("F2", CultureInfo.InvariantCulture) + " GB more for the extra KV caches, taken from the pinned layers.");
+            }
+            if (e.Speculate)
+            {
+                e.Speculate = false;
+                if (e.Playbook != null) e.Playbook.Speculate = false;
+                Log.Info("guess-ahead is off with --batch (it is for one request at a time).");
+            }
         }
 
         static void ApplyPlaybook(EngineOptions e, string root)
@@ -358,7 +396,7 @@ Options:
         // commands: the CLI describes itself, so an agent can find every command and its inputs and outputs.
         static readonly string[][] CommandList =
         {
-            new[] { "serve", "--model [--model-id --port --api-key --context-length --cache-gb --no-prefetch --threads --int-dot --guess --no-guess --no-playbook --chat-template --max-tokens --max-queue --keepalive --no-auto-stop --stub --verbose]", "an OpenAI-compatible server on 127.0.0.1 (see docs/API.md)" },
+            new[] { "serve", "--model [--model-id --port --api-key --context-length --cache-gb --no-prefetch --threads --int-dot --guess --no-guess --batch --no-playbook --chat-template --max-tokens --max-queue --keepalive --no-auto-stop --stub --verbose]", "an OpenAI-compatible server on 127.0.0.1 (see docs/API.md)" },
             new[] { "run", "--model --prompt [--system --max-tokens --temperature and the serve options above]", "one reply in the console" },
             new[] { "info", "--model", "the model's shape, sizes and RAM needs (text)" },
             new[] { "playbook probe", "--model [--model-id --json --out]", "windlass.playbook/1: machine, measurements, settings, rules; saved in playbooks\\" },

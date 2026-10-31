@@ -94,6 +94,12 @@ namespace Windlass.Tests
                 Add(tests, "api: /v1/models from a real tiny model after probe, eval, fidelity and runs, without the engine lock", ApiModelFactsReal);
                 MoeTests.Register(tests);
                 ArchTests.Register(tests);
+                Add(tests, "batch: ForwardBatch gives the logits of separate runs, at different lengths", BatchForwardMatchesSingle);
+                Add(tests, "batch: N sequences stepped together read the model once per step, not N times", BatchReadsModelOncePerStep);
+                Add(tests, "batch: concurrent generations match single ones; prefix reuse per slot; batch 1 unchanged", BatchedBackendMatchesSingle);
+                Add(tests, "batch: concurrent API requests match sequential ones; a hang-up leaves the others alone", BatchApiConcurrency);
+                Add(tests, "batch: concurrent requests share the reads of the model", BatchRequestsShareReads);
+                Add(tests, "batch: RAM check, option validation and the scheduler's turns", BatchLimits);
                 Add(tests, "fairlead route: model list (id and context length)", FairleadModelList);
                 Add(tests, "fairlead route: a non-stream request with Fairlead's headers and body", FairleadNonStream);
                 Add(tests, "fairlead route: stream with usage, early headers and keepalives", FairleadStream);

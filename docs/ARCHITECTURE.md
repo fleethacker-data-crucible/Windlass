@@ -16,7 +16,13 @@
    rows once and reuse it for every token in a register-blocked kernel (`FastMath.cs`). `--int-dot` instead quantizes
    the activations to Q8 once and uses integer dot products (llama.cpp's CPU method). CPU: scalar C# with `Parallel.For` and unsafe pointers, like Phoenix's
    `CpuRef`.
-7. **Text.** The tokenizer (`Tokenizer.cs`: byte-level BPE for Llama 3 / Qwen / Mistral Tekken, SentencePiece for
+7. **Batching (opt-in).** With `--batch N`, one batch loop thread owns the model (`BatchEngine.cs`) and up to N requests
+   generate together, each on its own KV cache (`Sequence`, `Batch.cs`). Each step, `Transformer.ForwardBatch` stacks one
+   token per request into a single pass: the layers' weights are read once, every row-wise step (norms, RoPE, the
+   feed-forward) is shared code, the matrices multiply each row with the single-token kernel (so a row equals the token
+   run alone, bit for bit), and attention runs per request against its own cache. A joining request's prompt is a
+   separate pass. `--batch 1` (default) never enters this path.
+8. **Text.** The tokenizer (`Tokenizer.cs`: byte-level BPE for Llama 3 / Qwen / Mistral Tekken, SentencePiece for
    Llama 2 / Mistral) and the chat template (`ChatTemplate.cs`, recognised from the GGUF's Jinja template) are built
    in, so no Python or Jinja engine is needed.
 
@@ -69,3 +75,6 @@ can wait.
   for them are still to do.
 - More architectures, one family at a time. `qwen35` (Qwen 3.5's hybrid of attention and gated delta-net recurrent
   layers) is still not started.
+- Batching of queued requests (`--batch N`) is built and tested on tiny models (same logits and replies as one at a
+  time, model bytes read once per step); its throughput on real models is unmeasured. Not done: merging a joining
+  request's prompt into the decode step, and guess-ahead inside a batch.
