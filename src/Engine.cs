@@ -18,6 +18,7 @@ namespace Windlass
         public string ChatTemplate;          // null = detect
         public int Threads;                  // 0 = every logical core
         public bool Speculate;               // guess-ahead for greedy replies
+        public bool IntDot;                  // integer dot products with Q8 activations (FastMath.cs)
         public Playbook Playbook;            // the settings' reasons, logged at load (null = set by hand)
         public string PlaybookPath;          // where real runs are recorded (null = not recorded)
         public MachineFacts Machine;
@@ -59,6 +60,7 @@ namespace Windlass
             int ctx = _o.ContextLength > 0 ? _o.ContextLength : Math.Min(Config.ContextLength, EngineOptions.DefaultContext);
             ContextLength = ctx;
             Transformer.Threads = _o.Threads;
+            Transformer.IntDot = _o.IntDot;
             if (_o.Playbook != null) foreach (string r in _o.Playbook.Rules) Log.Info("playbook: " + r);
             _stream = new LayerStream(_g, Config, _o.Prefetch, _o.CacheBytes);
             Model = new Transformer(_g, Config, _stream, ctx);

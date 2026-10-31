@@ -40,6 +40,10 @@ namespace Windlass.Tests
                 Add(tests, "gguf: writer and reader agree", GgufRoundTrip);
                 Add(tests, "gguf: split model reads as one", SplitModel);
                 Add(tests, "quants: fused dot kernels match decode-then-dot", FusedDotMatchesDecode);
+                Add(tests, "fastmath: blocked float kernel is right on every tail and does not depend on the batch", FastMathTests.BlockedKernel);
+                Add(tests, "fastmath: Q8 activation quantizers follow ggml", FastMathTests.ActivationQuantizers);
+                Add(tests, "fastmath: integer dot kernels match the reference and the float kernels", FastMathTests.IntegerDotKernels);
+                Add(tests, "fastmath: integer dot products keep model logits close and the KV path consistent", FastMathTests.IntegerDotModels);
                 Add(tests, "engine: logits match llama.cpp for every weight type and architecture", LogitsMatchLlamaCpp);
                 Add(tests, "engine: streamed, prefetched and resident layers give identical logits", StreamingIsExact);
                 Add(tests, "engine: KV cache (one token at a time) matches a full pass", KvCacheMatchesFullPass);
@@ -89,7 +93,7 @@ namespace Windlass.Tests
 
         static void Add(List<KeyValuePair<string, Action>> l, string name, Action a) { l.Add(new KeyValuePair<string, Action>(name, a)); }
 
-        sealed class TestFailure : Exception { public TestFailure(string m) : base(m) { } }
+        public sealed class TestFailure : Exception { public TestFailure(string m) : base(m) { } }
 
         static void Check(bool ok, string what) { if (!ok) throw new TestFailure(what); }
         static void Equal<T>(T expected, T actual, string what)
