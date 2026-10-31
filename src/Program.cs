@@ -42,6 +42,7 @@ Options:
   --cache-gb <n>          keep up to n GB of layers resident in RAM instead of re-reading them (default 0)
   --no-prefetch           do not read the next layer while the current one computes
   --threads <n>           worker threads for the math (default: every logical core, or the playbook's choice)
+  --int-dot               integer dot products with 8-bit activations, llama.cpp's CPU method (default off; logits move slightly)
   --no-playbook           ignore the playbook; use the defaults and the options given
   --no-auto-stop          do not stop when the programs that sent heartbeats are gone (or set WINDLASS_AUTO_STOP=0)
   --guess / --no-guess    guess-ahead for greedy replies on or off (default: the playbook's choice, else off)
@@ -101,7 +102,7 @@ Options:
             }
         }
 
-        static readonly string[] Flags = { "no-auto-stop", "no-prefetch", "no-playbook", "stub", "verbose", "json", "guess", "no-guess" };
+        static readonly string[] Flags = { "int-dot", "no-auto-stop", "no-prefetch", "no-playbook", "stub", "verbose", "json", "guess", "no-guess" };
 
         public static Dictionary<string, string> ParseArgs(string[] args, int from)
         {
@@ -167,6 +168,7 @@ Options:
             if (o.ContainsKey("threads")) e.Threads = Int(o, "threads", 0, 1, 4096);
             if (o.ContainsKey("guess")) e.Speculate = true;
             if (o.ContainsKey("no-guess")) e.Speculate = false;
+            if (o.ContainsKey("int-dot")) e.IntDot = true;
             if (e.Playbook != null && (o.ContainsKey("no-prefetch") || o.ContainsKey("context-length") || o.ContainsKey("cache-gb") || o.ContainsKey("threads") || o.ContainsKey("guess") || o.ContainsKey("no-guess")))
                 e.Playbook.Rules.Add("Options given on the command line override the playbook where they differ.");
             return e;
@@ -294,7 +296,7 @@ Options:
         // commands: the CLI describes itself, so an agent can find every command and its inputs and outputs.
         static readonly string[][] CommandList =
         {
-            new[] { "serve", "--model [--model-id --port --api-key --context-length --cache-gb --no-prefetch --threads --guess --no-guess --no-playbook --chat-template --max-tokens --max-queue --keepalive --no-auto-stop --stub --verbose]", "an OpenAI-compatible server on 127.0.0.1 (see docs/API.md)" },
+            new[] { "serve", "--model [--model-id --port --api-key --context-length --cache-gb --no-prefetch --threads --int-dot --guess --no-guess --no-playbook --chat-template --max-tokens --max-queue --keepalive --no-auto-stop --stub --verbose]", "an OpenAI-compatible server on 127.0.0.1 (see docs/API.md)" },
             new[] { "run", "--model --prompt [--system --max-tokens --temperature and the serve options above]", "one reply in the console" },
             new[] { "info", "--model", "the model's shape, sizes and RAM needs (text)" },
             new[] { "playbook probe", "--model [--model-id --json --out]", "windlass.playbook/1: machine, measurements, settings, rules; saved in playbooks\\" },
