@@ -363,7 +363,10 @@ namespace Windlass.Tests
         static void ApiModelFactsReal()
         {
             TinySpec spec = new TinySpec { Arch = "llama", Type = GgmlType.Q8_0 };
-            string model = Model(spec);
+            // Other tests persist quality and fidelity for Model(spec). A probe deliberately
+            // preserves those measurements, so this test needs its own model identity.
+            string model = Path.Combine(_temp, "api-model-facts.gguf");
+            TinyModels.Write(model, spec);
             Equal(0, int.Parse(RunCli("playbook", "probe", "--model", model, "--json").Split('\n')[0]), "probe");
             EngineOptions o = Program.Engine(Program.ParseArgs(new string[] { "run", "--model", model, "--guess" }, 1), _temp);
             Check(o.Playbook != null && o.Playbook.PredictedSecPerToken > 0, "the playbook predicts after a probe");
