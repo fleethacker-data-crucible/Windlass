@@ -39,6 +39,7 @@ Windlass sets itself up for the computer it runs on (free RAM, cores, battery): 
 - **Runs models bigger than your GPU or RAM.** Only about two layers are in memory at once, and the next one is read while the current one computes. A 70B Q4_K_M model needs about 2 GB plus the KV cache.
 - **Llama 2/3, Mistral, Qwen2/2.5 and dense Qwen3** GGUF files in the usual quantizations (`Q8_0` to `Q2_K`), with built-in tokenizers and chat templates.
 - **OpenAI-compatible API**: chat completions with streaming, usage, keepalives during long layer passes, a FIFO queue and cancel on disconnect ([docs/API.md](docs/API.md)).
+- **Optional batching** (`serve --batch N`): up to N requests generate together, one pass over the layers per step for all of them, with the same replies as one at a time. Off by default; each slot adds a KV cache of RAM; the throughput gain is unmeasured ([docs/USAGE.md](docs/USAGE.md#batching)).
 - **Fairlead's `deep-local` route.** Register Windlass in Fairlead as a local provider, reachable only by name, so interactive tools never wait on it.
 - **Slow by design.** Measured on a Ryzen 9 9950X3D with 96 GB RAM: about 8.7 s per token for Llama 3.3 70B, 0.75 s per token for Llama 3.2 3B. Use it for batch and deep work, not chat ([docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#speed)).
 

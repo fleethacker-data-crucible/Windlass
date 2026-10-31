@@ -51,6 +51,28 @@ score is kept in the playbook and shown by `playbook show`. How speed and qualit
 `windlass.commands/1`), and `--out <file>` writes it as UTF-8 without a BOM, so scripts and agents can use them
 (see the Fleet CLI parity proposal). Exit code 0 is success, 1 an error, 2 a usage error.
 
+## Batching
+
+By default one request generates at a time and the others wait. With `--batch N` (2 to 64), up to N requests generate
+together: every step takes one token from each of them and runs them through the layers in one pass, so each layer's
+weights are read from disk (or the file cache) once per step for all of them, not once per request. For a shared server
+under a streamed 70B model, where every token costs a full read of the file, that is where the time goes.
+
+- **Same replies.** A request's text, finish reason and token counts are the same whether it runs alone or beside others
+  (greedy and seeded alike); the tests check the logits are identical bit for bit. No request gets faster by itself: a
+  step costs a little more with more rows, so the gain is total throughput. **How much, on real models and hardware, is
+  unmeasured**; the tests only prove the mechanism (bytes read once per step on tiny models).
+- **RAM.** Each slot has its own fp16 KV cache that grows with use up to the context: `2 x layers x KV width x 2 bytes`
+  per token (`info` prints it per token; 0.33 MB per token for Llama 3.3 70B, so 2.7 GB per slot at 8192 context). `--batch N`
+  adds up to N-1 more such caches, and the load log says how much. Windlass refuses a `--batch` whose caches do not fit
+  the quarter of its RAM budget that the playbook allows for the KV cache (the same rule as the playbook's context
+  choice). With the playbook, a context it chose is halved until N caches fit and the extra is taken from the pinned
+  layers; a `--context-length` you gave is refused instead. Use a smaller `--batch` or `--context-length`.
+- **Prompts** of joining requests run as their own pass, so running requests pause for it. A new request takes the free slot
+  whose cached prompt shares the longest start with it, so follow-up turns still reuse their cache.
+- **Guess-ahead** (`--guess`) is for one request at a time: it is off with `--batch`.
+- **Queue.** `--max-queue` counts requests waiting beyond the N that run.
+
 ## Options
 
 | Option | Default | What it does |
@@ -65,6 +87,7 @@ score is kept in the playbook and shown by `playbook show`. How speed and qualit
 | `--threads` | playbook | Worker threads for the math. |
 | `--int-dot` | off | Integer dot products with 8-bit activations (llama.cpp's CPU method) for Q8_0, Q4_0, Q4_K, Q5_K and Q6_K. In principle faster per generated token on the CPU (unmeasured on real models); logits move slightly because activations are rounded to 8 bits. |
 | `--guess`, `--no-guess` | playbook | Guess-ahead for greedy replies on or off. |
+| `--batch` | `1` | `serve`: let up to this many requests generate together (see [Batching](#batching)). `1` is one at a time, as before. |
 | `--no-playbook` | off | Ignore the playbook: the defaults below plus the options you give. |
 | `--chat-template` | detected | `llama3`, `chatml`, `mistral`, `mistral-v7` or `llama2`. |
 | `--max-tokens` | `1024` | `max_tokens` for requests that give none. |

@@ -17,7 +17,8 @@ namespace Windlass
         public int ContextLength;            // 0 = min(model's, DefaultContext)
         public string ChatTemplate;          // null = detect
         public int Threads;                  // 0 = every logical core
-        public bool Speculate;               // guess-ahead for greedy replies
+        public bool Speculate;               // guess-ahead for greedy replies (batch 1 only)
+        public int Batch = 1;                // requests that generate together, one KV cache each (1 = one at a time, as before)
         public bool IntDot;                  // integer dot products with Q8 activations (FastMath.cs)
         public Playbook Playbook;            // the settings' reasons, logged at load (null = set by hand)
         public string PlaybookPath;          // where real runs are recorded (null = not recorded)
@@ -25,7 +26,7 @@ namespace Windlass
         public const int DefaultContext = 8192;
     }
 
-    public sealed class LayeredBackend : Backend
+    public sealed partial class LayeredBackend : Backend
     {
         readonly EngineOptions _o;
         GgufModelFile _g;
@@ -60,6 +61,11 @@ namespace Windlass
             int ctx = _o.ContextLength > 0 ? _o.ContextLength : Math.Min(Config.ContextLength, EngineOptions.DefaultContext);
             ContextLength = ctx;
             Transformer.Threads = _o.Threads;
+            if (_o.Batch > 1)
+            {
+                string why = BatchPlan.Check(Config, ctx, _o.Batch, _o.Machine ?? MachineFacts.Detect());
+                if (why != null) throw new ArgumentException(why);
+            }
             Transformer.IntDot = _o.IntDot;
             if (_o.Playbook != null) foreach (string r in _o.Playbook.Rules) Log.Info("playbook: " + r);
             _stream = new LayerStream(_g, Config, _o.Prefetch, _o.CacheBytes);
@@ -71,6 +77,13 @@ namespace Windlass
             Log.Info(string.Format("RAM: {0:F2} GB per layer slot x {1}, {2:F1} GB of layers kept resident, KV cache up to {3:F1} GB, {4} threads",
                 _stream.SlotBytes / 1e9, _o.Prefetch ? 2 : 1, _stream.CachedBytes / 1e9, 2.0 * Config.Layers * Config.KvDim * 2.0 * ctx / 1e9,
                 _o.Threads > 0 ? _o.Threads : Environment.ProcessorCount));
+            if (_o.Batch > 1)
+            {
+                Log.Info(string.Format("Batch: up to {0} requests generate together, one KV cache each: up to {1:F2} GB per slot, {2:F2} GB in all ({3:F2} GB more than one request would use)",
+                    _o.Batch, BatchPlan.KvBytes(Config, ctx, 1) / 1e9, BatchKvBytes / 1e9, BatchPlan.KvBytes(Config, ctx, _o.Batch - 1) / 1e9));
+                if (_o.Speculate) Log.Warn("guess-ahead is off with --batch (it is for one request at a time)");
+                StartBatching();
+            }
             Log.Info("Loaded in " + sw.Elapsed.TotalSeconds.ToString("F1") + " s");
             State = BackendState.Ready;
         }
@@ -82,6 +95,7 @@ namespace Windlass
 
         public override GenerationResult Generate(GenerationRequest req, Action<string> onText, Action<int, int> onStage, CancellationToken cancel)
         {
+            if (_o.Batch > 1) return GenerateBatched(req, onText, onStage, cancel);   // BatchEngine.cs
             lock (_run)
             {
                 List<int> ids = EncodePrompt(req.Messages);
@@ -259,6 +273,7 @@ namespace Windlass
 
         public override void Dispose()
         {
+            StopBatching();
             if (_stream != null) _stream.Dispose();
         }
     }

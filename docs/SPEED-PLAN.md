@@ -54,7 +54,7 @@ owner, not a tuning change. Until then a server instance is reached the same way
 | 6 | **Smaller quants** (IQ2_XXS, IQ2_S, IQ3_S) | ~1.5-2x | **~2x**; a ~19 GB 2-bit 70B may fit in 32 GB RAM, moving it to the left column | real quality loss at 2-bit |
 | 7 | **Prompt-lookup speculation**: guess the next tokens from text already in the context, check them in one batched pass | 1x on free text, **1.5-3x** on edits, summaries, code | same | free; port from Phoenix |
 | 8 | **Draft-model speculation** (e.g. Llama 3.2 1B drafting for Llama 3.3 70B, same tokenizer) | ~2-3x | ~2-3x | ~1 GB RAM plus draft compute; tokenizers must match |
-| 9 | **Batch queued requests through one pass** (the core AirLLM idea Windlass lacks) | **~Nx** throughput for N requests | same | no single request gets faster; mainly for a shared server |
+| 9 | **Batch queued requests through one pass** (the core AirLLM idea Windlass lacks) | **~Nx** throughput for N requests | same | no single request gets faster; mainly for a shared server. **Status: built, opt-in as `--batch N`** (tests prove same replies and one read of the model per step on tiny models; real throughput unmeasured; guess-ahead stays for batch 1; prompts of joining requests are separate passes) |
 | 10 | **MoE models** (e.g. Qwen3-30B-A3B ~18 GB, fits a 32 GB laptop; Qwen3-235B-A22B reads ~22B params per token) | 3-10x vs dense of similar quality | same or more | new architecture work |
 | 11 | **fp16 KV cache**, grow without copying every layer | half the KV memory | frees ~1.3 GB at 4k for item 4 | small |
 | 12 | **Blocked matmul for prompts** (4 rows x 4 tokens in registers) | **2-4x prompt processing** | same | no help when generating |

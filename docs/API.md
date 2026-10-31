@@ -25,9 +25,18 @@ prompt (`context_length_exceeded`), 401 for a wrong key, 404 for an unknown mode
 A streaming request gets its headers and an `: accepted` comment as soon as it is accepted, then a `: keepalive`
 comment every 15 s while it waits in the queue or while a layer pass runs, so a router can tell slow from dead.
 
-**One at a time.** Windlass runs one generation at a time; others wait in a FIFO queue and the log shows each one's
-position. A streaming client that disconnects cancels its generation at the next layer, freeing the turn for the
+**One at a time (default).** Windlass runs one generation at a time; others wait in a FIFO queue and the log shows each
+one's position. A streaming client that disconnects cancels its generation at the next layer, freeing the turn for the
 next request.
+
+**Several at once (`--batch N`).** With `serve --batch N` up to N generations run together, one decode step for all of
+them per pass over the layers; request N+1 waits in the queue. Everything above is per request and unchanged: each
+stream gets its own headers, `: accepted`, text chunks, usage and `[DONE]`, keepalives while it waits, and its own stop
+sequences, `max_tokens` and `seed`; the reply is the same as when it runs alone. A client that disconnects cancels only
+its own request (at the next step) and frees its slot; the others carry on. A queue beyond `--max-queue` still answers
+503 `server_busy`. `/health` reports `busy` while any generation runs and `queued` for those waiting. A request that
+joins a running batch waits for the current step, then its prompt runs as its own pass before it decodes with the
+others. See [USAGE.md](USAGE.md#batching) for the RAM it adds.
 
 **Follow-up turns are cheaper:** the KV cache of the previous prompt is kept, and a new prompt that starts the same
 way (the earlier turns of a chat) skips that part.
