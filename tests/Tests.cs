@@ -82,6 +82,12 @@ namespace Windlass.Tests
                 Add(tests, "fidelity: playbook fidelity records a score on a tiny model and playbook show prints it", FidelityCli);
                 Add(tests, "api: /v1/models carries the windlass extension (null when unmeasured, numbers once measured)", ApiModelFacts);
                 Add(tests, "api: /v1/models from a real tiny model after probe, eval, fidelity and runs, without the engine lock", ApiModelFactsReal);
+                Add(tests, "fairlead route: model list (id and context length)", FairleadModelList);
+                Add(tests, "fairlead route: a non-stream request with Fairlead's headers and body", FairleadNonStream);
+                Add(tests, "fairlead route: stream with usage, early headers and keepalives", FairleadStream);
+                Add(tests, "fairlead route: busy, loading, unknown model and bad request give the statuses Fairlead fails over on", FairleadFailoverStatuses);
+                Add(tests, "fairlead route: the client key as a Bearer token", FairleadClientKey);
+                Add(tests, "fairlead route: loopback addresses only, and the port block", FairleadAddressAndPortBlock);
                 foreach (KeyValuePair<string, Action> t in tests)
                 {
                     if (filter != null && t.Key.IndexOf(filter, StringComparison.OrdinalIgnoreCase) < 0) continue;
