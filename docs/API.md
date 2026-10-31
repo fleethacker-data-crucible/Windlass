@@ -85,6 +85,13 @@ way (the earlier turns of a chat) skips that part.
 
 Windlass binds loopback only, as the suite requires, so Fairlead runs on the same PC.
 
+## Lifecycle: heartbeat
+
+`POST /__fleethacker/heartbeat` (with `X-FleetHacker-Heartbeat: 1`, body `{"client": "<name>", "leaving": false}`
+optional) tells Windlass its owner is still there. Once any heartbeat has arrived, Windlass stops itself when every
+client that sent one has gone quiet for 20 s or sent `"leaving": true` 5 s ago, never while a request is running or
+queued. Clients that never send a heartbeat are unaffected. `WINDLASS_AUTO_STOP=0` or `--no-auto-stop` turns it off.
+Details and the Fleet standard it follows: [LIFECYCLE.md](LIFECYCLE.md).
 ## Fairlead's `deep-local` route
 
 Fairlead treats Windlass as one more local OpenAI-compatible provider (route `deep-local`, target `windlass/<model>`;
