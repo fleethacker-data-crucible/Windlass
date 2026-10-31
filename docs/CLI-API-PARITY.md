@@ -16,6 +16,7 @@ with the gaps stated. `Launch-Windlass.bat commands --json` (`windlass.commands/
 | Measure this computer | `playbook probe` | none | `windlass.playbook/1` |
 | Show the settings that would be used | `playbook show` | none | `windlass.playbook/1` |
 | Score the model (perplexity) | `playbook eval` | none | `windlass.playbook/1` with quality |
+| Check long-context recall | `playbook fidelity` | none | `windlass.fidelity/1`; the score is also recorded in the playbook and published in `GET /v1/models` |
 | List commands | `commands [--json]` | none | `windlass.commands/1` |
 | Health and load state | none | `GET /health` | JSON: state, model, busy, queued |
 | Identify the tool, find its pid | none | `GET /__fleethacker/id` | JSON: tool, version, pid |

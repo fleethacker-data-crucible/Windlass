@@ -484,7 +484,8 @@ namespace Windlass
         {
             int rows = w.Rows, cols = w.Cols;
             if ((long)cols * T != x.Length || (long)rows * T > y.Length) throw new ArgumentException("MatMul shape mismatch for " + w.Name + ".");
-            if (EachToken && T > 1 && Quants.CanDot(w.Type)) { MatMulEach(w, x, T, y); return; }
+            // The integer kernels already give each row the result it would get alone, so only the float path needs MatMulEach.
+            if (EachToken && T > 1 && Quants.CanDot(w.Type) && !(IntDot && FastMath.CanIntDot(w.Type) && FastMath.Fits(w.Type, cols))) { MatMulEach(w, x, T, y); return; }
             IntPtr basePtr = (IntPtr)w.Data;
             long rowBytes = w.RowBytes;
             GgmlType type = w.Type;

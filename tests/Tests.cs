@@ -100,6 +100,7 @@ namespace Windlass.Tests
                 Add(tests, "batch: concurrent API requests match sequential ones; a hang-up leaves the others alone", BatchApiConcurrency);
                 Add(tests, "batch: concurrent requests share the reads of the model", BatchRequestsShareReads);
                 Add(tests, "batch: RAM check, option validation and the scheduler's turns", BatchLimits);
+                Add(tests, "batch: batched steps match single steps for MoE, Granite and OLMo 2 models and with --int-dot", BatchMeetsNewModelsAndIntDot);
                 Add(tests, "fairlead route: model list (id and context length)", FairleadModelList);
                 Add(tests, "fairlead route: a non-stream request with Fairlead's headers and body", FairleadNonStream);
                 Add(tests, "fairlead route: stream with usage, early headers and keepalives", FairleadStream);
