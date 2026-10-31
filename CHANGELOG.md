@@ -3,6 +3,8 @@
 ## Unreleased
 
 - I-quants: IQ4_NL, IQ4_XS, IQ3_XXS, IQ3_S, IQ2_XXS, IQ2_XS, IQ2_S, IQ1_S and IQ1_M weights now load and run (`src/IQuants.cs`, `src/IqTables.cs`; before, `ModelConfig` refused them). Reference ports of llama.cpp's `dequantize_row_iq*`, tested against an independent re-derivation and for identical streamed, prefetched and resident logits on tiny models; not yet logit-checked against llama.cpp (needs a real IQ model and llama.cpp, for Anthony). No fused dot: single tokens decode a row then dot it. Speed unmeasured.
+- Faster CPU math (`src/FastMath.cs`): prompts use a register-blocked kernel (4 weight rows x 2 tokens per pass; 1.39x faster than the old kernel in a single-thread microbenchmark on the dev desktop, unmeasured on real models), and `--int-dot` runs Q8_0, Q4_0, Q4_K, Q5_K and Q6_K with integer dot products on Q8 activations, as llama.cpp does. `--int-dot` is off by default until it is timed on a real model. A token's logits do not depend on how many tokens run beside it.
+
 - `playbook eval`: quality score (perplexity on a built-in passage written for the test (so no model has memorised it)) and prompt seconds per token, kept in the playbook; `docs/SPEED-QUALITY.md` sets out free vs costly speed-ups and the planned speed/quality dial.
 - Guess-ahead (prompt-lookup speculation) for greedy replies: up to 8 guesses from text already in the conversation, checked in one pass; the reply is unchanged. The playbook turns it on or off from a measured batch cost and from how many guesses real runs kept (`--guess` / `--no-guess` override).
 - The playbook learns from real runs (tokens, seconds, guesses kept), reports them in `playbook show` and uses them at the next start.
