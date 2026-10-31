@@ -16,6 +16,7 @@ namespace Windlass.Tests
     public static partial class Runner
     {
         static string _fixtures, _temp;
+        internal static string TempDir { get { return _temp; } }   // for test files that live in their own file (MoeTests.cs)
         static int _failed, _passed;
 
         public static int Main(string[] args)
@@ -91,6 +92,8 @@ namespace Windlass.Tests
                 Add(tests, "fidelity: playbook fidelity records a score on a tiny model and playbook show prints it", FidelityCli);
                 Add(tests, "api: /v1/models carries the windlass extension (null when unmeasured, numbers once measured)", ApiModelFacts);
                 Add(tests, "api: /v1/models from a real tiny model after probe, eval, fidelity and runs, without the engine lock", ApiModelFactsReal);
+                MoeTests.Register(tests);
+                ArchTests.Register(tests);
                 Add(tests, "fairlead route: model list (id and context length)", FairleadModelList);
                 Add(tests, "fairlead route: a non-stream request with Fairlead's headers and body", FairleadNonStream);
                 Add(tests, "fairlead route: stream with usage, early headers and keepalives", FairleadStream);

@@ -405,10 +405,10 @@ Options:
                     foreach (int i in picks) last = st.Acquire(i);
                     double secs = Math.Max(sw.Elapsed.TotalSeconds, 1e-6);
                     r.ReadGBps = (st.BytesRead - before) / 1e9 / secs;
-                    r.LayerSecLogical = TimeLayer(last, m.LogicalCores, 1);
-                    r.LayerSecPhysical = m.PhysicalCores < m.LogicalCores ? TimeLayer(last, m.PhysicalCores, 1) : r.LayerSecLogical;
+                    r.LayerSecLogical = TimeLayer(c, last, m.LogicalCores, 1);
+                    r.LayerSecPhysical = m.PhysicalCores < m.LogicalCores ? TimeLayer(c, last, m.PhysicalCores, 1) : r.LayerSecLogical;
                     // A token plus a full set of guesses in one pass, as guess-ahead checks them.
-                    r.LayerSecBatch = TimeLayer(last, r.LayerSecPhysical < r.LayerSecLogical * 0.97 ? m.PhysicalCores : m.LogicalCores, LayeredBackend.MaxGuesses + 1);
+                    r.LayerSecBatch = TimeLayer(c, last, r.LayerSecPhysical < r.LayerSecLogical * 0.97 ? m.PhysicalCores : m.LogicalCores, LayeredBackend.MaxGuesses + 1);
                 }
             }
             finally { Transformer.Threads = saved; }
@@ -416,23 +416,36 @@ Options:
         }
 
         // Best of three: every matrix of one layer times T tokens (1 = generating one token).
-        static double TimeLayer(Stage s, int threads, int T)
+        // An MoE layer times one expert's matrices, repeated for the experts a pass of T tokens touches (each token picks
+        // ExpertUsed of ExpertCount) with the tokens spread over them; the router and shared expert are ordinary matrices.
+        static double TimeLayer(ModelConfig c, Stage s, int threads, int T)
         {
             Transformer.Threads = threads;
             List<WeightView> mats = new List<WeightView>();
-            foreach (WeightView w in s.Views.Values) if (w.Rows > 1) mats.Add(w);
+            List<int> reps = new List<int>(), toks = new List<int>();
+            foreach (WeightView w in s.Views.Values)
+            {
+                if (w.Rows <= 1) continue;
+                if (w.Experts > 1)
+                {
+                    int touched = Math.Min(w.Experts, T * Math.Max(1, c.ExpertUsed));
+                    mats.Add(w.Slice(0)); reps.Add(touched); toks.Add(Math.Max(1, T * Math.Max(1, c.ExpertUsed) / touched));
+                }
+                else { mats.Add(w); reps.Add(1); toks.Add(T); }
+            }
             Random rng = new Random(1);
             float[][] xs = new float[mats.Count][], ys = new float[mats.Count][];
             for (int i = 0; i < mats.Count; i++)
             {
-                xs[i] = new float[mats[i].Cols * T]; ys[i] = new float[mats[i].Rows * T];
+                xs[i] = new float[mats[i].Cols * toks[i]]; ys[i] = new float[mats[i].Rows * toks[i]];
                 for (int j = 0; j < xs[i].Length; j++) xs[i][j] = (float)(rng.NextDouble() - 0.5);
             }
             double best = double.MaxValue;
             for (int rep = 0; rep < 3; rep++)
             {
                 Stopwatch sw = Stopwatch.StartNew();
-                for (int i = 0; i < mats.Count; i++) Transformer.MatMul(mats[i], xs[i], T, ys[i]);
+                for (int i = 0; i < mats.Count; i++)
+                    for (int r = 0; r < reps[i]; r++) Transformer.MatMul(mats[i], xs[i], toks[i], ys[i]);
                 best = Math.Min(best, sw.Elapsed.TotalSeconds);
             }
             return best;
@@ -514,11 +527,21 @@ Options:
                 string n = GgmlTypes.Name(t.Type);
                 long v; types.TryGetValue(n, out v); types[n] = v + t.SizeBytes;
             }
+            // The biggest layer sets the per-slot RAM (an MoE layer holds every expert, not just the chosen ones).
             long layer = 0;
-            foreach (GgufTensor t in g.Tensors) if (t.Name.StartsWith("blk.0.")) layer += t.SizeBytes;
+            for (int l = 0; l < c.Layers; l++)
+            {
+                long sz = 0;
+                foreach (GgufTensor t in g.Tensors) if (t.Name.StartsWith("blk." + l + ".", StringComparison.Ordinal)) sz += t.SizeBytes;
+                if (sz > layer) layer = sz;
+            }
             Console.WriteLine("name            " + c.Name);
             Console.WriteLine("architecture    " + c.Arch + (c.QkNorm ? " (QK norm)" : "") + (c.TiedEmbeddings ? ", tied embeddings" : ""));
-            Console.WriteLine("layers          " + c.Layers + " x " + (layer / 1e9).ToString("F2") + " GB");
+            Console.WriteLine("layers          " + c.Layers + " x " + (layer / 1e9).ToString("F2") + " GB" + (c.Moe ? " (largest; RAM per layer slot)" : ""));
+            if (c.Moe)
+                Console.WriteLine("experts         " + c.ExpertCount + " per layer, " + c.ExpertUsed + " used per token, ff " + c.ExpertFf
+                    + (c.SharedExpertFf > 0 ? ", shared expert ff " + c.SharedExpertFf : "") + (c.ExpertWeightsNorm ? ", weights renormalised" : "")
+                    + " (not logit-checked against llama.cpp)");
             Console.WriteLine("weights         " + (g.TotalBytes / 1e9).ToString("F2") + " GB in " + g.Paths.Count + " file(s)");
             Console.Write("types          ");
             foreach (KeyValuePair<string, long> kv in types) Console.Write(" " + kv.Key + " " + (kv.Value / 1e9).ToString("F2") + " GB;");

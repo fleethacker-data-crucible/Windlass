@@ -105,9 +105,30 @@ IQ model (for example an IQ4_XS or IQ3_S file) through Windlass and llama.cpp wi
 compare the logits or the first tokens. I-quants have no fused dot kernel, so each token decodes a row and then dots it
 (like Q2_K and Q3_K); their speed is unmeasured.
 
-Not yet: mixture-of-experts models, vision models, and other architectures (Gemma is Phoenix's
-job; `qwen35` is not supported yet). Windlass says so and refuses them at load.
+Mixture-of-experts GGUF files in the layouts llama.cpp writes (stacked `ffn_*_exps` tensors): Mixtral-style
+(`llama`, or `mixtral`, with `expert_count`), `qwen2moe` (adds the shared expert) and `qwen3moe` (QK norm, may keep
+some layers dense). The router is a softmax over all experts, the best `expert_used_count` run, and their weights are
+renormalised to sum to 1 for Mixtral and Qwen3-MoE but not for Qwen2-MoE (llama.cpp's `build_moe_ffn`; an
+`expert_weights_norm` key in the file wins). Only the chosen experts compute, which saves compute, not disk reads:
+a layer is still read whole, so RAM per layer slot is the size of all its experts and the disk-bound speed of a model
+bigger than RAM does not improve. `info` shows the experts per layer; `playbook probe` times one layer with the
+experts a token touches. Older files with one `ffn_gate.N.weight` tensor per expert are refused.
 
+MoE is **not parity-checked against llama.cpp** (there is no llama.cpp on the build machine): it is tested against a
+float reference written independently in `tests\MoeTests.cs`. Check a real small MoE file (for example
+Qwen3-30B-A3B) against llama.cpp's logits before relying on it.
+
+`granite` (Granite 3 dense: the Llama graph plus `embedding_scale`, `residual_scale`, `attention.scale` and
+`logit_scale` from the file, as llama.cpp applies them) and `olmo2` (OLMo 2: no norm before attention or the FFN, the
+attention and FFN outputs are normalised before the residual add, Q and K are normalised over their whole vectors,
+NEOX RoPE). Both are checked only against a float reference written in `tests\ArchTests.cs`, not against llama.cpp,
+and neither has its chat template or pre-tokenizer built in: Granite (`refact`) and OLMo 2 (`dbrx`) fall back to the
+GPT-2 pre-tokenizer rules with a warning, and the chat template falls back to ChatML, which is wrong for both. Treat
+them as experimental until a real file has been compared with llama.cpp and the templates are added. Granite MoE and
+the hybrid Granite 4 (`granitehybrid`) are not supported.
+
+Not yet: vision models, and other architectures (Gemma is Phoenix's job; `qwen35` is not supported yet). Windlass says so and refuses
+them at load.
 ## Requirements
 
 | Needs | |

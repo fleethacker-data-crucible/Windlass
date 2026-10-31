@@ -94,6 +94,11 @@ namespace Windlass
         }
         public int Cols { get { return (int)Dims[0]; } }
         public int Rows { get { return (int)(ElementCount / Dims[0]); } }
+        // Stacked expert tensors (MoE) are [cols, rows, experts]: Experts is 1 for ordinary 2-D weights, and Rows counts
+        // every expert's rows. Expert e starts at row e * ExpertRows, i.e. byte e * ExpertBytes.
+        public int Experts { get { long n = 1; for (int i = 2; i < Dims.Length; i++) n *= Dims[i]; return (int)n; } }
+        public int ExpertRows { get { return Rows / Experts; } }
+        public long ExpertBytes { get { return SizeBytes / Experts; } }
     }
 
     public sealed class GgufModelFile

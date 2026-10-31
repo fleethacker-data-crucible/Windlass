@@ -20,6 +20,18 @@ namespace Windlass
         public int Rows, Cols;
         public long RowBytes;
         public byte* Data;
+        public int Experts = 1;                  // stacked MoE tensor: Rows is per expert and Data starts at expert 0
+
+        // Expert e of a stacked tensor as an ordinary matrix: row pointer arithmetic only, nothing is read or copied.
+        public WeightView Slice(int expert)
+        {
+            if (expert < 0 || expert >= Experts) throw new ArgumentOutOfRangeException("expert", "Expert " + expert + " is outside 0.." + (Experts - 1) + " of " + Name + ".");
+            WeightView v = new WeightView();
+            v.Name = Name + "[" + expert + "]";
+            v.Type = Type; v.Rows = Rows; v.Cols = Cols; v.RowBytes = RowBytes;
+            v.Data = Data + (long)expert * Rows * RowBytes;
+            return v;
+        }
     }
 
     public sealed unsafe class Stage
@@ -42,6 +54,9 @@ namespace Windlass
             WeightView v;
             return Views.TryGetValue(name, out v) ? v : null;
         }
+
+        // One expert of a stacked MoE tensor (ffn_gate_exps.weight and so on).
+        public WeightView Expert(string name, int expert) { return Get(name).Slice(expert); }
     }
 
     public sealed unsafe class LayerStream : IDisposable
@@ -174,8 +189,9 @@ namespace Windlass
                 v.Name = t.Name;
                 v.Type = t.Type;
                 v.Cols = t.Cols;
-                v.Rows = t.Rows;
-                v.RowBytes = t.SizeBytes / v.Rows;
+                v.Experts = t.Experts;
+                v.Rows = t.ExpertRows;           // per expert; Views of 2-D weights are unchanged (Experts = 1)
+                v.RowBytes = t.SizeBytes / t.Rows;
                 v.Data = (byte*)basePtr + off;
                 string key = t.Name;
                 int dot = key.IndexOf('.');
