@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Tests for the Fairlead `deep-local` route contract (`testsFairleadRouteTests.cs`): model list, non-stream and stream requests shaped like Fairlead's, failover statuses, client key, loopback hosts and the port block. `docs/API.md` lists which checklist items are covered and which are hand checks.
+
 - `playbook eval`: quality score (perplexity on a built-in passage written for the test (so no model has memorised it)) and prompt seconds per token, kept in the playbook; `docs/SPEED-QUALITY.md` sets out free vs costly speed-ups and the planned speed/quality dial.
 - Guess-ahead (prompt-lookup speculation) for greedy replies: up to 8 guesses from text already in the conversation, checked in one pass; the reply is unchanged. The playbook turns it on or off from a measured batch cost and from how many guesses real runs kept (`--guess` / `--no-guess` override).
 - The playbook learns from real runs (tokens, seconds, guesses kept), reports them in `playbook show` and uses them at the next start.
