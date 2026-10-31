@@ -19,6 +19,9 @@ namespace Windlass
 
         // Worker threads for the matrix and attention loops (0 = every logical core). Set from the machine playbook.
         public static int Threads;
+        // Integer dot products with Q8 activations (llama.cpp's own CPU method) for the types that have them. Off by
+        // default: it rounds the activations to 8 bits, so logits move slightly; set from --int-dot.
+        public static bool IntDot;
         static ParallelOptions Par { get { ParallelOptions o = new ParallelOptions(); o.MaxDegreeOfParallelism = Threads > 0 ? Threads : -1; return o; } }
 
         public readonly int MaxContext;
@@ -407,7 +410,8 @@ namespace Windlass
             long rowBytes = w.RowBytes;
             GgmlType type = w.Type;
             int tiles = (rows + RowTile - 1) / RowTile;
-            if (T == 1 && Quants.CanDot(type))
+            bool intDot = IntDot && FastMath.CanIntDot(type) && FastMath.Fits(type, cols);
+            if (T == 1 && Quants.CanDot(type) && !intDot)
             {
                 Parallel.For(0, tiles, Par, delegate(int tile)
                 {
@@ -417,18 +421,36 @@ namespace Windlass
                 });
                 return;
             }
+            if (intDot)
+            {
+                // Integer dot products: quantize the activations once (Q8), then every weight row is an integer
+                // multiply-add that reads the row's bytes directly (no decode step).
+                FastMath.QActs qa = FastMath.Quantize(x, T, cols, FastMath.NeedsK(type));
+                int nb = cols / (qa.K ? 256 : 32), nbs = cols / 16;
+                Parallel.For(0, tiles, Par, delegate(int tile)
+                {
+                    int r0 = tile * RowTile, r1 = Math.Min(rows, r0 + RowTile);
+                    fixed (sbyte* qp = qa.Q) fixed (float* dp = qa.D) fixed (float* yp = y)
+                    fixed (short* bp = qa.Bsums)
+                    {
+                        for (int r = r0; r < r1; r++)
+                        {
+                            byte* wr = (byte*)basePtr + r * rowBytes;
+                            for (int t = 0; t < T; t++)
+                                yp[(long)t * rows + r] = FastMath.IntDot(type, wr, qp + (long)t * cols, dp + t * nb, qa.K ? bp + t * nbs : null, cols);
+                        }
+                    }
+                });
+                return;
+            }
             Parallel.For(0, tiles, Par, () => new float[(long)RowTile * cols], delegate(int tile, ParallelLoopState st, float[] scratch)
             {
                 int r0 = tile * RowTile, r1 = Math.Min(rows, r0 + RowTile);
                 fixed (float* sp = scratch) fixed (float* xp = x) fixed (float* yp = y)
                 {
                     for (int r = r0; r < r1; r++) Quants.DecodeRow(type, (byte*)basePtr + r * rowBytes, cols, sp + (long)(r - r0) * cols);
-                    for (int t = 0; t < T; t++)
-                    {
-                        float* xt = xp + (long)t * cols;
-                        float* yt = yp + (long)t * rows;
-                        for (int r = r0; r < r1; r++) yt[r] = Dot(sp + (long)(r - r0) * cols, xt, cols);
-                    }
+                    // Register-blocked: 4 weight rows by 2 tokens per pass, so each loaded value is used several times.
+                    FastMath.Block(sp, cols, r1 - r0, xp, cols, T, cols, yp + r0, rows);
                 }
                 return scratch;
             }, delegate(float[] scratch) { });

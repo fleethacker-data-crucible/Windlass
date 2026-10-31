@@ -63,6 +63,7 @@ score is kept in the playbook and shown by `playbook show`. How speed and qualit
 | `--cache-gb` | playbook (`0` with `--no-playbook`) | Keep the first layers that fit in this many GB resident, so they are read from disk once. |
 | `--no-prefetch` | off | Do not read the next layer while the current one computes (saves one layer of RAM). |
 | `--threads` | playbook | Worker threads for the math. |
+| `--int-dot` | off | Integer dot products with 8-bit activations (llama.cpp's CPU method) for Q8_0, Q4_0, Q4_K, Q5_K and Q6_K. In principle faster per generated token on the CPU (unmeasured on real models); logits move slightly because activations are rounded to 8 bits. |
 | `--guess`, `--no-guess` | playbook | Guess-ahead for greedy replies on or off. |
 | `--no-playbook` | off | Ignore the playbook: the defaults below plus the options you give. |
 | `--chat-template` | detected | `llama3`, `chatml`, `mistral`, `mistral-v7` or `llama2`. |
