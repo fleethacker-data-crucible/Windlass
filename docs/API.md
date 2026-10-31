@@ -51,3 +51,21 @@ optional) tells Windlass its owner is still there. Once any heartbeat has arrive
 client that sent one has gone quiet for 20 s or sent `"leaving": true` 5 s ago, never while a request is running or
 queued. Clients that never send a heartbeat are unaffected. `WINDLASS_AUTO_STOP=0` or `--no-auto-stop` turns it off.
 Details and the Fleet standard it follows: [LIFECYCLE.md](LIFECYCLE.md).
+## Fairlead's `deep-local` route
+
+Fairlead treats Windlass as one more local OpenAI-compatible provider (route `deep-local`, target `windlass/<model>`;
+Fairlead's `integrations/windlass/README.md` holds the contract and the registration steps). `tests\FairleadRouteTests.cs`
+runs the real server against a stub model with the requests Fairlead sends (its client key as a Bearer token, the
+`X-Fairlead-Privacy: local` header, a route header and request id, a body with extra fields Windlass ignores).
+
+| Fairlead checklist item | Covered by |
+| --- | --- |
+| `GET /v1/models` lists the model and its context length | test: model list |
+| A short non-stream request completes inside the timeout | test: non-stream request (the timeout itself is Fairlead's setting) |
+| A streamed request survives a multi-minute layer pass (keepalives arrive) | test: headers and an SSE comment before the first token, keepalives while a slow pass runs, default interval under 60 s. **Hand check** for a real multi-minute pass on a big model |
+| Fairlead's Activity shows the tokens and the long first-token time | test: usage on both reply kinds. **Hand check** of the Activity view in Fairlead |
+| A second request while busy gets 503 (or queues) and Fairlead reports it clearly | test: 503 `server_busy` with a message and `Retry-After`, 503 `model_loading`, 404 unknown model, 400 bad request (Fairlead fails over on 5xx and does not retry 400) |
+
+Also tested: the client key as a Bearer token when Windlass has `--api-key`, loopback `Host` names only, and Windlass's
+port block (8777-8779, `src\FleetPorts.psd1`). Not tested here (needs Fairlead running): a live round trip through
+Fairlead.
