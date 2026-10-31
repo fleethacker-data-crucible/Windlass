@@ -59,6 +59,7 @@ namespace Windlass.Tests
                 Add(tests, "stop scanner holds back partial stop sequences", StopScannerWorks);
                 Add(tests, "sampler: greedy, seeded and top_p", SamplerWorks);
                 Add(tests, "cli: argument parsing", CliArgs);
+                Add(tests, "cli and api: docs/CLI-API-PARITY.md names every command and route", CliApiParityDocs);
                 Add(tests, "playbook: machine facts from Start-Windlass", PlaybookFacts);
                 Add(tests, "playbook: rules fit a desktop, a laptop on battery and a small machine", PlaybookRules);
                 Add(tests, "playbook: measurements pick threads and predict speed", PlaybookMeasured);
