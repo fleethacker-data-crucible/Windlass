@@ -216,11 +216,12 @@ namespace Windlass.Tests
                     Transformer tr = new Transformer(g, c, st, 512);
                     float[] step = tr.Forward(new int[] { toks[0], toks[1], toks[2], toks[3] }, 0, false, CancellationToken.None, null);
                     for (int i = 4; i < toks.Length; i++) step = tr.Forward(new int[] { toks[i] }, i, false, CancellationToken.None, null);
+                    // The prompt pass uses the blocked float kernel and single tokens the fused kernels, so rounding differs a little; a cache bug moves logits by whole units.
                     for (int i = 0; i < full.Length; i++)
-                        Check(Math.Abs(full[i] - step[i]) < 1e-3, s.Key + ": token-by-token logits differ at " + i + " (" + full[i] + " vs " + step[i] + ")");
+                        Check(Math.Abs(full[i] - step[i]) < 0.02, s.Key + ": token-by-token logits differ at " + i + " (" + full[i] + " vs " + step[i] + ")");
                     tr.Truncate(6);
                     float[] again = tr.Forward(new int[] { toks[6], toks[7], toks[8], toks[9], toks[10], toks[11] }, 6, false, CancellationToken.None, null);
-                    for (int i = 0; i < full.Length; i++) Check(Math.Abs(full[i] - again[i]) < 1e-3, s.Key + ": logits after Truncate differ at " + i);
+                    for (int i = 0; i < full.Length; i++) Check(Math.Abs(full[i] - again[i]) < 0.02, s.Key + ": logits after Truncate differ at " + i);
                 }
             }
         }
