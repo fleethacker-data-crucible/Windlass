@@ -13,7 +13,8 @@
    repeated prompt prefix is reused.
 6. **Compute.** Weights stay in their GGUF format on disk and in RAM and are decoded on the fly (`Quants.cs`, a port
    of llama.cpp's reference decoders). Single tokens use fused decode-and-dot kernels; prompts decode each tile of
-   rows once and reuse it for every token. CPU: scalar C# with `Parallel.For` and unsafe pointers, like Phoenix's
+   rows once and reuse it for every token in a register-blocked kernel (`FastMath.cs`). `--int-dot` instead quantizes
+   the activations to Q8 once and uses integer dot products (llama.cpp's CPU method). CPU: scalar C# with `Parallel.For` and unsafe pointers, like Phoenix's
    `CpuRef`.
 7. **Batching (opt-in).** With `--batch N`, one batch loop thread owns the model (`BatchEngine.cs`) and up to N requests
    generate together, each on its own KV cache (`Sequence`, `Batch.cs`). Each step, `Transformer.ForwardBatch` stacks one

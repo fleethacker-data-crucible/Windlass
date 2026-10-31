@@ -19,6 +19,7 @@ namespace Windlass
         public int Threads;                  // 0 = every logical core
         public bool Speculate;               // guess-ahead for greedy replies (batch 1 only)
         public int Batch = 1;                // requests that generate together, one KV cache each (1 = one at a time, as before)
+        public bool IntDot;                  // integer dot products with Q8 activations (FastMath.cs)
         public Playbook Playbook;            // the settings' reasons, logged at load (null = set by hand)
         public string PlaybookPath;          // where real runs are recorded (null = not recorded)
         public MachineFacts Machine;
@@ -65,6 +66,7 @@ namespace Windlass
                 string why = BatchPlan.Check(Config, ctx, _o.Batch, _o.Machine ?? MachineFacts.Detect());
                 if (why != null) throw new ArgumentException(why);
             }
+            Transformer.IntDot = _o.IntDot;
             if (_o.Playbook != null) foreach (string r in _o.Playbook.Rules) Log.Info("playbook: " + r);
             _stream = new LayerStream(_g, Config, _o.Prefetch, _o.CacheBytes);
             Model = new Transformer(_g, Config, _stream, ctx);
