@@ -61,7 +61,7 @@ namespace Windlass
                         throw new NotSupportedException("Layer " + l + " has no " + n + ".weight (unsupported layout).");
             foreach (GgufTensor t in g.Tensors)
                 if (t.Name.EndsWith(".weight") && t.Dims.Length >= 2 && !Quants.CanDecode(t.Type))
-                    throw new NotSupportedException("Tensor " + t.Name + " uses " + GgmlTypes.Name(t.Type) + ", which Windlass cannot decode yet. Use a Q8_0, Q6_K, Q5_K_M, Q4_K_M, Q3_K_M or Q2_K file.");
+                    throw new NotSupportedException("Tensor " + t.Name + " uses " + GgmlTypes.Name(t.Type) + ", which Windlass cannot decode yet. Use a Q8_0, Q6_K, Q5_K_M, Q4_K_M, Q3_K_M, Q2_K or I-quant (IQ4_NL, IQ4_XS, IQ3_XXS, IQ3_S, IQ2_XXS, IQ2_XS, IQ2_S, IQ1_S, IQ1_M) file.");
             return c;
         }
 

@@ -60,5 +60,6 @@ can wait.
 - **GPU offload (Vulkan).** Stream each layer into VRAM and run it with the SPIR-V kernels Phoenix already
   generates in C#, keeping the zero-dependency rule. This turns prompt processing from the slow part into the fast
   part.
-- fp16 KV cache, I-quants and mixture-of-experts layers.
+- Mixture-of-experts layers. (Done: the fp16 KV cache, and I-quant decoding, which has no fused dot and no llama.cpp logit
+  check yet; see `docs/USAGE.md`.)
 - More architectures, one family at a time (for example `qwen35`, Qwen 3.5's hybrid of attention and recurrent layers).

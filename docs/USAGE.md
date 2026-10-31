@@ -95,9 +95,17 @@ machinery, not model quality.
 
 GGUF files of the `llama` (Llama 2, Llama 3.x, Mistral 7B, Mistral Large and other Llama-layout models), `qwen2`
 (Qwen2, Qwen2.5) and `qwen3` (dense Qwen3) architectures, in F32, F16, BF16, Q8_0, Q5_0, Q5_1, Q4_0, Q4_1, Q6_K,
-Q5_K, Q4_K, Q3_K or Q2_K (so the usual `Q8_0`, `Q6_K`, `Q5_K_M`, `Q4_K_M`, `Q3_K_M` and `Q2_K` files).
+Q5_K, Q4_K, Q3_K or Q2_K (so the usual `Q8_0`, `Q6_K`, `Q5_K_M`, `Q4_K_M`, `Q3_K_M` and `Q2_K` files), or in the
+I-quants IQ4_NL, IQ4_XS, IQ3_XXS, IQ3_S, IQ2_XXS, IQ2_XS, IQ2_S, IQ1_S or IQ1_M (the `IQ*` files).
 
-Not yet: mixture-of-experts models, I-quants (`IQ*`), vision models, and other architectures (Gemma is Phoenix's
+The I-quant decoders are ports of llama.cpp's `dequantize_row_iq*` and are tested against an independent re-derivation
+of the block layouts, and for exact agreement between the streamed, prefetched and resident paths on tiny models. They
+are **not yet checked against llama.cpp**: there is no llama.cpp on the development machine. To verify, run one real
+IQ model (for example an IQ4_XS or IQ3_S file) through Windlass and llama.cpp with the same prompt at temperature 0 and
+compare the logits or the first tokens. I-quants have no fused dot kernel, so each token decodes a row and then dots it
+(like Q2_K and Q3_K); their speed is unmeasured.
+
+Not yet: mixture-of-experts models, vision models, and other architectures (Gemma is Phoenix's
 job; `qwen35` is not supported yet). Windlass says so and refuses them at load.
 
 ## Requirements
