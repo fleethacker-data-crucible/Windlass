@@ -69,6 +69,7 @@ score is kept in the playbook and shown by `playbook show`. How speed and qualit
 | `--max-tokens` | `1024` | `max_tokens` for requests that give none. |
 | `--max-queue` | `8` | Requests that may wait behind the running one; more get `503 server_busy`. |
 | `--keepalive` | `15` | Seconds between SSE `: keepalive` comments (under 60). |
+| `--no-auto-stop` | off | Do not stop when the programs that sent heartbeats are gone (also `WINDLASS_AUTO_STOP=0`). See [LIFECYCLE.md](LIFECYCLE.md). |
 | `--stub` | off | Serve a canned reply with no model, to test wiring. |
 | `--verbose` | off | Log every layer. |
 

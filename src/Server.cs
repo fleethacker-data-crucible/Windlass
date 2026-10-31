@@ -1,6 +1,7 @@
 // OpenAI-compatible HTTP API on loopback (HttpListener). C# 5 only.
 // Endpoints: POST /v1/chat/completions (stream or not), GET /v1/models, GET /v1/models/{id}, GET /health, and the
-// FleetHacker GET /__fleethacker/id + POST /__fleethacker/shutdown (edge-ops PORTS.md).
+// FleetHacker GET /__fleethacker/id + POST /__fleethacker/shutdown (edge-ops PORTS.md), and POST /__fleethacker/heartbeat
+// (the Fleet local app lifecycle standard: stop when whoever sent heartbeats is gone; Presence.cs).
 // One generation runs at a time; others wait in a bounded FIFO queue (beyond it: 503). A streaming request gets its
 // headers and an SSE comment as soon as it is accepted, then ": keepalive" comments while it waits or while a slow
 // layer pass runs, so a router can tell slow from dead.
@@ -25,6 +26,9 @@ namespace Windlass
         public string Version = "0.0.0";
         public string ScriptPath;              // reported by /__fleethacker/id
         public bool LoadOnStartup = true;
+        public bool AutoStop = true;           // stop when the programs that sent heartbeats are gone (see Presence.cs); off: WINDLASS_AUTO_STOP=0 or --no-auto-stop
+        public int PresenceTickMs = 1000;      // how often the stop rule is checked; 0 = not at all (tests call PresenceTick)
+        public Func<DateTime> Clock;           // UTC now; tests pass a fake
     }
 
     // One running job and a bounded FIFO of waiting ones.
@@ -98,6 +102,8 @@ namespace Windlass
         readonly Backend _backend;
         readonly ServerSettings _s;
         readonly Scheduler _sched;
+        readonly Presence _presence;
+        Thread _presenceThread;
         readonly HttpListener _listener = new HttpListener();
         readonly ManualResetEvent _stopped = new ManualResetEvent(false);
         Thread _accept;
@@ -107,6 +113,7 @@ namespace Windlass
             _backend = backend;
             _s = settings;
             _sched = new Scheduler(settings.MaxQueue);
+            _presence = new Presence(settings.AutoStop);
         }
 
         public WaitHandle Stopped { get { return _stopped; } }
@@ -123,6 +130,11 @@ namespace Windlass
             }
             _accept = new Thread(AcceptLoop) { IsBackground = true, Name = "windlass-accept" };
             _accept.Start();
+            if (_s.AutoStop && _s.PresenceTickMs > 0)
+            {
+                _presenceThread = new Thread(PresenceLoop) { IsBackground = true, Name = "windlass-presence" };
+                _presenceThread.Start();
+            }
         }
 
         void LoadModel()
@@ -148,6 +160,27 @@ namespace Windlass
                 Thread t = new Thread(delegate() { Handle(ctx); }) { IsBackground = true, Name = "windlass-request" };
                 t.Start();
             }
+        }
+
+        DateTime Now() { return _s.Clock != null ? _s.Clock() : DateTime.UtcNow; }
+
+        public Presence Presence { get { return _presence; } }
+
+        void PresenceLoop()
+        {
+            while (!_stopped.WaitOne(_s.PresenceTickMs))
+                if (PresenceTick(Now())) break;
+        }
+
+        // The stop rule for programs that send heartbeats. A running or queued request keeps Windlass open (never stop
+        // mid-generation); the stop then comes on the first tick after it ends. Returns true when it stopped the server.
+        public bool PresenceTick(DateTime now)
+        {
+            bool busy = _sched.Busy || _sched.Waiting > 0;
+            if (!_presence.ShouldStop(now, busy)) return false;
+            Log.Info("no program that sent heartbeats is left; stopping (WINDLASS_AUTO_STOP=0 or --no-auto-stop turns this off)");
+            Stop();
+            return true;
         }
 
         public void Stop()
@@ -243,6 +276,32 @@ namespace Windlass
                 Send(res, 200, new Dictionary<string, object> { { "stopping", true } });
                 Log.Info("shutdown requested over HTTP");
                 ThreadPool.QueueUserWorkItem(delegate { Thread.Sleep(200); Stop(); });
+                return;
+            }
+            if (path == "/__fleethacker/heartbeat" && method == "POST")
+            {
+                // Body (optional): {"client": "<name>", "leaving": true}. Needs the same custom header as shutdown, so a web
+                // page cannot send it cross-site without a preflight.
+                if (req.Headers["X-FleetHacker-Heartbeat"] != "1") { Error(res, 400, "missing X-FleetHacker-Heartbeat: 1", "invalid_request_error"); return; }
+                string client = "";
+                bool leaving = false;
+                if (req.HasEntityBody)
+                {
+                    string text;
+                    using (StreamReader r = new StreamReader(req.InputStream, new UTF8Encoding(false))) text = r.ReadToEnd();
+                    Dictionary<string, object> body = null;
+                    try { body = Json.Parse(text) as Dictionary<string, object>; } catch (FormatException) { }
+                    object v;
+                    if (body != null && body.TryGetValue("client", out v) && v is string) client = ((string)v).Length > 64 ? ((string)v).Substring(0, 64) : (string)v;
+                    if (body != null && body.TryGetValue("leaving", out v) && v is bool) leaving = (bool)v;
+                }
+                _presence.Heartbeat(client, leaving, Now());
+                Dictionary<string, object> hb = new Dictionary<string, object>();
+                hb["ok"] = true;
+                hb["autoStop"] = _presence.Enabled;
+                hb["timeoutSeconds"] = Presence.TimeoutSeconds;
+                hb["leavingGraceSeconds"] = Presence.LeavingGraceSeconds;
+                Send(res, 200, hb);
                 return;
             }
             if (path == "/health" && method == "GET")

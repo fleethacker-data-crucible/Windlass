@@ -13,7 +13,7 @@ using System.Threading;
 
 namespace Windlass.Tests
 {
-    public static class Runner
+    public static partial class Runner
     {
         static string _fixtures, _temp;
         static int _failed, _passed;
@@ -62,6 +62,8 @@ namespace Windlass.Tests
                 Add(tests, "playbook: saved, reused only on the same machine and model, and applied by the CLI", PlaybookSavedAndApplied);
                 Add(tests, "cli: commands and playbook show print versioned JSON; --out writes UTF-8 without a BOM", CliJson);
                 Add(tests, "api: models, health and fleethacker id", ApiBasics);
+                Add(tests, "presence: the stop rule (fake clock): arming, timeout, leaving, reload, several clients, busy", PresenceRules);
+                Add(tests, "api: heartbeat route and auto-stop (fake clock): header, arming, silence, never mid-generation, off switch", ApiHeartbeat);
                 Add(tests, "api: non-streaming reply with usage", ApiPlain);
                 Add(tests, "api: streaming chunks, usage chunk and [DONE]", ApiStream);
                 Add(tests, "api: request errors have OpenAI shapes and real status codes", ApiErrors);

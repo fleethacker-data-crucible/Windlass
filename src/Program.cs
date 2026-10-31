@@ -43,6 +43,7 @@ Options:
   --no-prefetch           do not read the next layer while the current one computes
   --threads <n>           worker threads for the math (default: every logical core, or the playbook's choice)
   --no-playbook           ignore the playbook; use the defaults and the options given
+  --no-auto-stop          do not stop when the programs that sent heartbeats are gone (or set WINDLASS_AUTO_STOP=0)
   --guess / --no-guess    guess-ahead for greedy replies on or off (default: the playbook's choice, else off)
   --chat-template <name>  llama3, chatml, mistral, mistral-v7 or llama2 (default: detected)
   --max-tokens <n>        max_tokens for requests that give none (default 1024)
@@ -100,7 +101,7 @@ Options:
             }
         }
 
-        static readonly string[] Flags = { "no-prefetch", "no-playbook", "stub", "verbose", "json", "guess", "no-guess" };
+        static readonly string[] Flags = { "no-auto-stop", "no-prefetch", "no-playbook", "stub", "verbose", "json", "guess", "no-guess" };
 
         public static Dictionary<string, string> ParseArgs(string[] args, int from)
         {
@@ -293,7 +294,7 @@ Options:
         // commands: the CLI describes itself, so an agent can find every command and its inputs and outputs.
         static readonly string[][] CommandList =
         {
-            new[] { "serve", "--model [--model-id --port --api-key --context-length --cache-gb --no-prefetch --threads --guess --no-guess --no-playbook --chat-template --max-tokens --max-queue --keepalive --stub --verbose]", "an OpenAI-compatible server on 127.0.0.1 (see docs/API.md)" },
+            new[] { "serve", "--model [--model-id --port --api-key --context-length --cache-gb --no-prefetch --threads --guess --no-guess --no-playbook --chat-template --max-tokens --max-queue --keepalive --no-auto-stop --stub --verbose]", "an OpenAI-compatible server on 127.0.0.1 (see docs/API.md)" },
             new[] { "run", "--model --prompt [--system --max-tokens --temperature and the serve options above]", "one reply in the console" },
             new[] { "info", "--model", "the model's shape, sizes and RAM needs (text)" },
             new[] { "playbook probe", "--model [--model-id --json --out]", "windlass.playbook/1: machine, measurements, settings, rules; saved in playbooks\\" },
@@ -383,6 +384,7 @@ Options:
             s.DefaultMaxTokens = Int(o, "max-tokens", 1024, 1, 1 << 20);
             s.Version = version;
             s.ScriptPath = scriptPath;
+            s.AutoStop = !o.ContainsKey("no-auto-stop") && Environment.GetEnvironmentVariable("WINDLASS_AUTO_STOP") != "0";
 
             Backend backend;
             if (o.ContainsKey("stub"))
