@@ -48,7 +48,7 @@ Windlass binds loopback only (`127.0.0.1` and `localhost`), checks every request
 
 ## Documentation
 
-- [Usage: commands, options, models, requirements](docs/USAGE.md) · [API and Fairlead setup](docs/API.md) · [How it works, speed, roadmap](docs/ARCHITECTURE.md) · [Development and tests](docs/DEVELOPMENT.md)
+- [Usage: commands, options, models, requirements](docs/USAGE.md) · [API and Fairlead setup](docs/API.md) · [How it works, speed, roadmap](docs/ARCHITECTURE.md) · [Development and tests](docs/DEVELOPMENT.md) · [CLI and API parity](docs/CLI-API-PARITY.md)
 - [Engine briefing (one-page infographic)](docs/briefing/) · [Stress test: Llama 3.3 70B, phases 1–6](docs/STRESS-TEST.md) · [Changelog](CHANGELOG.md) · [Third-party notices](THIRD-PARTY.md)
 
 ## License

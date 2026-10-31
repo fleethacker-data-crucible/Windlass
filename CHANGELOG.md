@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `docs/CLI-API-PARITY.md`: every Windlass command and API route against the Fleet CLI parity proposal, with the gaps stated (`info` and `run` have no `--json`, no per-session token file, no generated route list). A test keeps the page in step with `commands --json` and the routes.
+
 - `playbook eval`: quality score (perplexity on a built-in passage written for the test (so no model has memorised it)) and prompt seconds per token, kept in the playbook; `docs/SPEED-QUALITY.md` sets out free vs costly speed-ups and the planned speed/quality dial.
 - Guess-ahead (prompt-lookup speculation) for greedy replies: up to 8 guesses from text already in the conversation, checked in one pass; the reply is unchanged. The playbook turns it on or off from a measured batch cost and from how many guesses real runs kept (`--guess` / `--no-guess` override).
 - The playbook learns from real runs (tokens, seconds, guesses kept), reports them in `playbook show` and uses them at the next start.
