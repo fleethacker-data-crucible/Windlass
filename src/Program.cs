@@ -171,8 +171,8 @@ Options:
             if (o.ContainsKey("no-guess")) e.Speculate = false;
             if (o.ContainsKey("batch")) e.Batch = Int(o, "batch", 1, 1, BatchPlan.MaxBatch);
             if (e.Batch > 1) ApplyBatch(e, o);
-            if (e.Playbook != null && (o.ContainsKey("no-prefetch") || o.ContainsKey("context-length") || o.ContainsKey("cache-gb") || o.ContainsKey("threads") || o.ContainsKey("guess") || o.ContainsKey("no-guess") || o.ContainsKey("batch")))
             if (o.ContainsKey("int-dot")) e.IntDot = true;
+            if (e.Playbook != null && (o.ContainsKey("no-prefetch") || o.ContainsKey("context-length") || o.ContainsKey("cache-gb") || o.ContainsKey("threads") || o.ContainsKey("guess") || o.ContainsKey("no-guess") || o.ContainsKey("batch")))
                 e.Playbook.Rules.Add("Options given on the command line override the playbook where they differ.");
             return e;
         }
