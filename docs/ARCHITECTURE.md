@@ -52,7 +52,7 @@ helper.
 
 | | Phoenix LAI | Windlass |
 | --- | --- | --- |
-| Models | Gemma 4, loaded whole into VRAM | Llama 2/3, Mistral, Qwen2/2.5, Qwen3, streamed from disk |
+| Models | Gemma 4, loaded whole into VRAM | Llama 2/3, Mistral, Qwen2/2.5, Qwen3, Mixtral and Qwen MoE, streamed from disk |
 | Model size | what fits on the GPU | bigger than RAM: only about two layers are in memory at once |
 | Speed | interactive chat | seconds to minutes per token |
 | Compute | Vulkan GPU | CPU (v0.2) |
@@ -66,8 +66,15 @@ can wait.
 - **GPU offload (Vulkan).** Stream each layer into VRAM and run it with the SPIR-V kernels Phoenix already
   generates in C#, keeping the zero-dependency rule. This turns prompt processing from the slow part into the fast
   part.
-- fp16 KV cache, I-quants and mixture-of-experts layers.
+- fp16 KV cache and I-quants: done. I-quants have no fused dot and no llama.cpp logit check yet; see `docs/USAGE.md`.
+- **Mixture-of-experts: done on the CPU, not parity-checked against llama.cpp.** Mixtral-style, `qwen2moe` and
+  `qwen3moe` run with only the chosen experts computed; see [USAGE.md](USAGE.md#models). A layer is still streamed
+  with all its experts, so a big MoE is still bound by the disk when it does not fit in RAM. Speed is unmeasured on
+  real MoE models.
+- **`granite` and `olmo2`: forward pass done, not parity-checked against llama.cpp**; chat templates and pre-tokenizers
+  for them are still to do.
+- More architectures, one family at a time. `qwen35` (Qwen 3.5's hybrid of attention and gated delta-net recurrent
+  layers) is still not started.
 - Batching of queued requests (`--batch N`) is built and tested on tiny models (same logits and replies as one at a
   time, model bytes read once per step); its throughput on real models is unmeasured. Not done: merging a joining
   request's prompt into the decode step, and guess-ahead inside a batch.
-- More architectures, one family at a time (for example `qwen35`, Qwen 3.5's hybrid of attention and recurrent layers).

@@ -120,6 +120,11 @@ namespace Windlass
         // Measured by `playbook eval`: perplexity on the built-in passage (lower is better) and prompt reading speed.
         public double QualityPerplexity, PromptSecPerToken;
         public int QualityTokens;
+        public string QualityMeasured;       // when playbook eval ran (UTC, ISO 8601); null = never
+        // Measured by `playbook fidelity`: planted facts recalled correctly out of those asked, in a log of
+        // FidelityPromptTokens tokens (FidelityTotal 0 = not measured).
+        public int FidelityCorrect, FidelityTotal, FidelityPromptTokens, FidelityVersion;
+        public string FidelityMeasured;
         // Observed in real runs on this machine (totals since the playbook was measured).
         public long ObsRuns, ObsPromptTokens, ObsTokens, ObsGuessed, ObsAccepted;
         public double ObsPromptSeconds, ObsSeconds;
@@ -128,23 +133,89 @@ namespace Windlass
         public bool Prefetch, Speculate;
         public int ContextLength, Threads;
         public double PredictedSecPerToken;
+        public string Limit;                 // "disk" or "cpu" when a probe let the playbook name it, else null
         public readonly List<string> Rules = new List<string>();
+        readonly object _obs = new object();  // real runs update the totals while /v1/models reads them
 
         public bool Measured { get { return LayerSecPhysical > 0 && LayerSecLogical > 0 && ReadGBps > 0; } }
         public const int MinGuessesToJudge = 200;
         public const double MinKeptRate = 0.15, MaxBatchCost = 2.5;
+        // Real-run totals become a published "observed" speed only once they cover this many tokens.
+        public const int MinObservedTokens = 20;
 
         public void SetQuality(QualityResult q)
         {
             QualityPerplexity = q.Perplexity; QualityTokens = q.Tokens; PromptSecPerToken = q.SecPerPromptToken;
+            QualityMeasured = DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture);
+        }
+
+        public void SetFidelity(FidelityResult f)
+        {
+            FidelityCorrect = f.Correct; FidelityTotal = f.Total; FidelityPromptTokens = f.PromptTokens; FidelityVersion = Fidelity.Version;
+            FidelityMeasured = DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture);
+        }
+
+        // Keeps what `playbook eval` and `playbook fidelity` measured when the speed side is measured again.
+        public void CopyScoresFrom(Playbook h)
+        {
+            QualityPerplexity = h.QualityPerplexity; QualityTokens = h.QualityTokens; PromptSecPerToken = h.PromptSecPerToken; QualityMeasured = h.QualityMeasured;
+            FidelityCorrect = h.FidelityCorrect; FidelityTotal = h.FidelityTotal; FidelityPromptTokens = h.FidelityPromptTokens;
+            FidelityVersion = h.FidelityVersion; FidelityMeasured = h.FidelityMeasured;
         }
 
         public void Observe(int promptTokens, double promptSeconds, int tokens, double seconds, int guessed, int accepted)
         {
-            ObsRuns++;
-            ObsPromptTokens += promptTokens; ObsPromptSeconds += promptSeconds;
-            ObsTokens += tokens; ObsSeconds += seconds;
-            ObsGuessed += guessed; ObsAccepted += accepted;
+            lock (_obs)
+            {
+                ObsRuns++;
+                ObsPromptTokens += promptTokens; ObsPromptSeconds += promptSeconds;
+                ObsTokens += tokens; ObsSeconds += seconds;
+                ObsGuessed += guessed; ObsAccepted += accepted;
+            }
+        }
+
+        // One published speed figure. Values never measured are null, never a guess.
+        static Dictionary<string, object> Figure(double predicted, string predictedSource, long obsCount, double obsSeconds)
+        {
+            object pred = predicted > 0 ? (object)predicted : null;
+            object obs = obsCount >= MinObservedTokens && obsSeconds > 0 ? (object)(obsSeconds / obsCount) : null;
+            Dictionary<string, object> d = new Dictionary<string, object>();
+            d["value"] = obs ?? pred;
+            d["predicted"] = pred;
+            d["observed"] = obs;
+            d["measured"] = (obs ?? pred) != null;
+            d["source"] = obs != null ? "real-runs" : pred != null ? predictedSource : "none";
+            d["samples"] = obsCount;
+            return d;
+        }
+
+        // What this playbook measured, for GET /v1/models (the `windlass` object; see docs/API.md). Only the keys that
+        // are known appear; ModelFacts fills the rest with null. Safe to call while a request is running.
+        public Dictionary<string, object> ToFacts()
+        {
+            Dictionary<string, object> f = new Dictionary<string, object>();
+            lock (_obs)
+            {
+                Dictionary<string, object> speed = new Dictionary<string, object>();
+                speed["secPerToken"] = Figure(PredictedSecPerToken, "probe", ObsTokens, ObsSeconds);
+                speed["secPerPromptToken"] = Figure(PromptSecPerToken, "eval", ObsPromptTokens, ObsPromptSeconds);
+                speed["limit"] = Limit;
+                f["speed"] = speed;
+                Dictionary<string, object> q = new Dictionary<string, object>();
+                if (QualityPerplexity > 0)
+                {
+                    q["perplexity"] = QualityPerplexity; q["tokens"] = (long)QualityTokens; q["measuredAt"] = QualityMeasured;
+                }
+                f["quality"] = q;
+                Dictionary<string, object> fi = new Dictionary<string, object>();
+                if (FidelityTotal > 0)
+                {
+                    fi["score"] = (double)FidelityCorrect / FidelityTotal; fi["correct"] = (long)FidelityCorrect; fi["total"] = (long)FidelityTotal;
+                    fi["promptTokens"] = (long)FidelityPromptTokens; fi["version"] = (long)FidelityVersion; fi["measuredAt"] = FidelityMeasured;
+                }
+                f["fidelity"] = fi;
+            }
+            return f;
         }
 
         static string Gb(long b) { return (b / 1e9).ToString("F1", CultureInfo.InvariantCulture) + " GB"; }
@@ -165,7 +236,7 @@ namespace Windlass
                 p.ObsRuns = history.ObsRuns; p.ObsPromptTokens = history.ObsPromptTokens; p.ObsPromptSeconds = history.ObsPromptSeconds;
                 p.ObsTokens = history.ObsTokens; p.ObsSeconds = history.ObsSeconds;
                 p.ObsGuessed = history.ObsGuessed; p.ObsAccepted = history.ObsAccepted;
-                p.QualityPerplexity = history.QualityPerplexity; p.QualityTokens = history.QualityTokens; p.PromptSecPerToken = history.PromptSecPerToken;
+                p.CopyScoresFrom(history);
             }
 
             // 1. RAM budget: leave room for Windows and the other programs on this computer.
@@ -238,6 +309,7 @@ namespace Windlass
                 double compute = s.Layers * (p.Threads == m.PhysicalCores && m.PhysicalCores < m.LogicalCores ? p.LayerSecPhysical : p.LayerSecLogical);
                 read = (s.StreamedBytes - p.CacheBytes) / (p.ReadGBps * GB);
                 p.PredictedSecPerToken = p.Prefetch ? Math.Max(compute, read) : compute + read;
+                p.Limit = read > compute ? "disk" : "cpu";
                 p.Rules.Add("Expect about " + F(p.PredictedSecPerToken, "F1") + " s per token (compute " + F(compute, "F1") + " s, reading " + F(read, "F1") + " s" +
                             (read > compute ? "; the disk is the limit" : "; the CPU is the limit") + ").");
             }
@@ -272,6 +344,11 @@ namespace Windlass
             if (p.QualityPerplexity > 0)
                 p.Rules.Add("Quality: perplexity " + F(p.QualityPerplexity, "F2") + " on " + p.QualityTokens + " tokens of the built-in passage (lower is better; compare only models with the same tokenizer). " +
                             "Prompts read at " + F(p.PromptSecPerToken, "F2") + " s per token, so a 1,000-token prompt takes about " + F(1000 * p.PromptSecPerToken / 60, "F0") + " min.");
+
+            // 8b. Context fidelity, when `playbook fidelity` has checked this model here.
+            if (p.FidelityTotal > 0)
+                p.Rules.Add("Context fidelity: " + p.FidelityCorrect + " of " + p.FidelityTotal + " facts planted in a " + p.FidelityPromptTokens +
+                            "-token log were recalled (" + F(100.0 * p.FidelityCorrect / p.FidelityTotal, "F0") + "%). A short log says little about long conversations; run `playbook fidelity --tokens <n>` for a longer one.");
 
             // 9. What real runs on this machine showed.
             if (p.ObsTokens >= 20 && p.ObsSeconds > 0)
@@ -314,10 +391,16 @@ namespace Windlass
             Dictionary<string, object> q = new Dictionary<string, object>();
             q["perplexity"] = QualityPerplexity; q["tokens"] = (long)QualityTokens; q["promptSecPerToken"] = PromptSecPerToken;
             q["passage"] = "Windlass test passage v1 (original, built in)";
+            q["measured"] = QualityMeasured;
             d["quality"] = q;
+            Dictionary<string, object> fi = new Dictionary<string, object>();
+            fi["correct"] = (long)FidelityCorrect; fi["total"] = (long)FidelityTotal; fi["promptTokens"] = (long)FidelityPromptTokens;
+            fi["score"] = FidelityTotal > 0 ? (object)((double)FidelityCorrect / FidelityTotal) : null;
+            fi["version"] = (long)FidelityVersion; fi["measured"] = FidelityMeasured;
+            d["fidelity"] = fi;
             Dictionary<string, object> st = new Dictionary<string, object>();
             st["cacheGB"] = Math.Round(CacheBytes / 1e9, 2); st["prefetch"] = Prefetch; st["contextLength"] = (long)ContextLength;
-            st["threads"] = (long)Threads; st["speculate"] = Speculate; st["predictedSecPerToken"] = PredictedSecPerToken;
+            st["threads"] = (long)Threads; st["speculate"] = Speculate; st["predictedSecPerToken"] = PredictedSecPerToken; st["limit"] = Limit;
             d["settings"] = st;
             List<object> rules = new List<object>(); foreach (string r in Rules) rules.Add(r); d["rules"] = rules;
             return Json.Write(d);
@@ -357,6 +440,14 @@ namespace Windlass
                 p.QualityPerplexity = Json.GetNum(q, "perplexity", 0);
                 p.QualityTokens = (int)Json.GetNum(q, "tokens", 0);
                 p.PromptSecPerToken = Json.GetNum(q, "promptSecPerToken", 0);
+                p.QualityMeasured = Json.GetStr(q, "measured", null);
+            }
+            if (d.TryGetValue("fidelity", out v) && v is Dictionary<string, object>)
+            {
+                Dictionary<string, object> fi = (Dictionary<string, object>)v;
+                p.FidelityCorrect = (int)Json.GetNum(fi, "correct", 0); p.FidelityTotal = (int)Json.GetNum(fi, "total", 0);
+                p.FidelityPromptTokens = (int)Json.GetNum(fi, "promptTokens", 0); p.FidelityVersion = (int)Json.GetNum(fi, "version", 0);
+                p.FidelityMeasured = Json.GetStr(fi, "measured", null);
             }
             return p;
         }

@@ -26,6 +26,9 @@ namespace Windlass
                           the settings serve and run would use now, and why (measures nothing)
   Launch-Windlass.bat playbook eval  --model <file.gguf> [--tokens <n>] [--json] [--out <file>]
                           score quality: perplexity on a built-in passage (lower is better), and prompt speed
+  Launch-Windlass.bat playbook fidelity --model <file.gguf> [--facts <n>] [--tokens <n>] [--questions <k>] [--seed <n>] [--json] [--out <file>]
+                          context fidelity: plant n facts in a log of about <n> tokens, ask for them back, score the recalls
+                          (default 4 facts, 300 tokens: a long log is slow on a CPU)
   Launch-Windlass.bat commands [--json]   every command with its inputs and outputs
 
 serve and run pick their settings from this computer's playbook (RAM free, cores, battery; plus measurements after
@@ -44,6 +47,7 @@ Options:
   --threads <n>           worker threads for the math (default: every logical core, or the playbook's choice)
   --int-dot               integer dot products with 8-bit activations, llama.cpp's CPU method (default off; logits move slightly)
   --no-playbook           ignore the playbook; use the defaults and the options given
+  --no-auto-stop          do not stop when the programs that sent heartbeats are gone (or set WINDLASS_AUTO_STOP=0)
   --guess / --no-guess    guess-ahead for greedy replies on or off (default: the playbook's choice, else off)
   --batch <n>             serve: let up to n requests generate together, one pass over the layers per step for all
                           of them (default 1 = one at a time). Each adds a KV cache; guess-ahead is off
@@ -72,7 +76,7 @@ Options:
             int optionsFrom = 1;
             if (command == "playbook")
             {
-                if (args.Length < 2 || args[1].StartsWith("--")) { Console.Error.WriteLine("playbook needs a verb: probe or show. Run Launch-Windlass.bat help."); return 2; }
+                if (args.Length < 2 || args[1].StartsWith("--")) { Console.Error.WriteLine("playbook needs a verb: probe, show, eval or fidelity. Run Launch-Windlass.bat help."); return 2; }
                 command = "playbook " + args[1];
                 optionsFrom = 2;
             }
@@ -91,6 +95,7 @@ Options:
                     case "playbook probe": return PlaybookCommand(o, root, true);
                     case "playbook show": return PlaybookCommand(o, root, false);
                     case "playbook eval": return PlaybookEval(o, root);
+                    case "playbook fidelity": return PlaybookFidelity(o, root);
                     case "commands": return Commands(o);
                 }
                 Console.Error.WriteLine("Unknown command '" + command + "'.\n\n" + Usage);
@@ -103,7 +108,7 @@ Options:
             }
         }
 
-        static readonly string[] Flags = { "int-dot", "no-prefetch", "no-playbook", "stub", "verbose", "json", "guess", "no-guess" };
+        static readonly string[] Flags = { "int-dot", "no-auto-stop", "no-prefetch", "no-playbook", "stub", "verbose", "json", "guess", "no-guess" };
 
         public static Dictionary<string, string> ParseArgs(string[] args, int from)
         {
@@ -252,7 +257,7 @@ Options:
             if (measure)
             {
                 measured = Measure(g, c, m);
-                if (history != null) { measured.QualityPerplexity = history.QualityPerplexity; measured.QualityTokens = history.QualityTokens; measured.PromptSecPerToken = history.PromptSecPerToken; }
+                if (history != null) measured.CopyScoresFrom(history);
             }
             Playbook p = Playbook.Plan(m, s, measure ? measured : history);
             p.Save(file, m);
@@ -330,15 +335,74 @@ Options:
             return 0;
         }
 
+        // playbook fidelity: plants facts in a synthetic log, asks about them, and records how many were recalled in the
+        // playbook next to the perplexity. The default log is a few hundred tokens: every prompt costs real time on a CPU.
+        static int PlaybookFidelity(Dictionary<string, string> o, string root)
+        {
+            bool json = o.ContainsKey("json");
+            EngineOptions e = Engine(o, root);
+            e.PlaybookPath = null;   // the check is not a real run; recorded below as fidelity instead
+            int facts = Int(o, "facts", Fidelity.DefaultFacts, 1, Fidelity.MaxFacts);
+            int tokens = Int(o, "tokens", Fidelity.DefaultTokens, 64, 1 << 20);
+            int questions = Int(o, "questions", 0, 0, Fidelity.MaxFacts);
+            int seed = Int(o, "seed", Fidelity.DefaultSeed, 0, int.MaxValue);
+            if (questions > facts) throw new ArgumentException("--questions cannot be more than --facts.");
+            LayeredBackend b = new LayeredBackend(e);
+            FidelityResult f;
+            try
+            {
+                if (!json) Console.WriteLine("Loading " + b.ModelId + " and asking about " + facts + " facts planted in a log of about " + tokens + " tokens...");
+                b.Load();
+                f = b.CheckFidelity(facts, tokens, questions, seed, CancellationToken.None);
+            }
+            finally { b.Dispose(); }
+            Playbook p = e.Playbook;
+            string file = p != null ? Playbook.PathFor(root, b.ModelId) : null;
+            if (p != null)
+            {
+                p.SetFidelity(f);
+                GgufModelFile g = GgufModelFile.Open(e.ModelPath);
+                ModelShape s = ModelShape.From(g, ModelConfig.From(g), b.ModelId);
+                p = Playbook.Plan(e.Machine, s, p);
+                p.Save(file, e.Machine);
+            }
+            string outPath;
+            if (json || o.TryGetValue("out", out outPath))
+            {
+                Dictionary<string, object> r = new Dictionary<string, object>();
+                r["schema"] = "windlass.fidelity/1"; r["model"] = b.ModelId; r["version"] = (long)Fidelity.Version;
+                r["score"] = f.Score; r["correct"] = (long)f.Correct; r["total"] = (long)f.Total;
+                r["promptTokens"] = (long)f.PromptTokens; r["seed"] = (long)f.Seed; r["maxTokens"] = (long)f.MaxTokens; r["seconds"] = f.Seconds;
+                List<object> qs = new List<object>();
+                for (int i = 0; i < f.Total; i++)
+                {
+                    Dictionary<string, object> q = new Dictionary<string, object>();
+                    q["question"] = f.Asked[i].Question; q["planted"] = f.Asked[i].Answer; q["reply"] = f.Replies[i]; q["recalled"] = f.Recalled[i];
+                    qs.Add(q);
+                }
+                r["questions"] = qs;
+                string doc = Json.Write(r);
+                if (o.TryGetValue("out", out outPath)) File.WriteAllText(Path.GetFullPath(outPath), doc, new UTF8Encoding(false));
+                else Console.WriteLine(doc);
+                return 0;
+            }
+            Console.WriteLine("fidelity        " + f.Correct + " of " + f.Total + " planted facts recalled (" + (100.0 * f.Score).ToString("F0") + "%) in a " + f.PromptTokens + "-token log, " + f.Seconds.ToString("F1") + " s");
+            for (int i = 0; i < f.Total; i++)
+                Console.WriteLine("  " + (f.Recalled[i] ? "yes" : "no ") + "  " + f.Asked[i].Answer + "  <- " + f.Replies[i].Replace("\n", " ").Trim());
+            if (file != null) Console.WriteLine("recorded in     " + file);
+            return 0;
+        }
+
         // commands: the CLI describes itself, so an agent can find every command and its inputs and outputs.
         static readonly string[][] CommandList =
         {
-            new[] { "serve", "--model [--model-id --port --api-key --context-length --cache-gb --no-prefetch --threads --int-dot --guess --no-guess --batch --no-playbook --chat-template --max-tokens --max-queue --keepalive --stub --verbose]", "an OpenAI-compatible server on 127.0.0.1 (see docs/API.md)" },
+            new[] { "serve", "--model [--model-id --port --api-key --context-length --cache-gb --no-prefetch --threads --int-dot --guess --no-guess --batch --no-playbook --chat-template --max-tokens --max-queue --keepalive --no-auto-stop --stub --verbose]", "an OpenAI-compatible server on 127.0.0.1 (see docs/API.md)" },
             new[] { "run", "--model --prompt [--system --max-tokens --temperature and the serve options above]", "one reply in the console" },
             new[] { "info", "--model", "the model's shape, sizes and RAM needs (text)" },
             new[] { "playbook probe", "--model [--model-id --json --out]", "windlass.playbook/1: machine, measurements, settings, rules; saved in playbooks\\" },
             new[] { "playbook show", "--model [--model-id --json --out]", "windlass.playbook/1 for the settings serve and run would use now" },
             new[] { "playbook eval", "--model [--model-id --tokens --json --out]", "windlass.playbook/1 with quality: perplexity on the built-in passage (lower is better) and prompt seconds per token" },
+            new[] { "playbook fidelity", "--model [--model-id --facts --tokens --questions --seed --json --out]", "windlass.fidelity/1: facts recalled out of facts asked in a synthetic log of about --tokens tokens; the score is saved in the playbook" },
             new[] { "commands", "[--json]", "windlass.commands/1: this list" },
         };
 
@@ -379,10 +443,10 @@ Options:
                     foreach (int i in picks) last = st.Acquire(i);
                     double secs = Math.Max(sw.Elapsed.TotalSeconds, 1e-6);
                     r.ReadGBps = (st.BytesRead - before) / 1e9 / secs;
-                    r.LayerSecLogical = TimeLayer(last, m.LogicalCores, 1);
-                    r.LayerSecPhysical = m.PhysicalCores < m.LogicalCores ? TimeLayer(last, m.PhysicalCores, 1) : r.LayerSecLogical;
+                    r.LayerSecLogical = TimeLayer(c, last, m.LogicalCores, 1);
+                    r.LayerSecPhysical = m.PhysicalCores < m.LogicalCores ? TimeLayer(c, last, m.PhysicalCores, 1) : r.LayerSecLogical;
                     // A token plus a full set of guesses in one pass, as guess-ahead checks them.
-                    r.LayerSecBatch = TimeLayer(last, r.LayerSecPhysical < r.LayerSecLogical * 0.97 ? m.PhysicalCores : m.LogicalCores, LayeredBackend.MaxGuesses + 1);
+                    r.LayerSecBatch = TimeLayer(c, last, r.LayerSecPhysical < r.LayerSecLogical * 0.97 ? m.PhysicalCores : m.LogicalCores, LayeredBackend.MaxGuesses + 1);
                 }
             }
             finally { Transformer.Threads = saved; }
@@ -390,23 +454,36 @@ Options:
         }
 
         // Best of three: every matrix of one layer times T tokens (1 = generating one token).
-        static double TimeLayer(Stage s, int threads, int T)
+        // An MoE layer times one expert's matrices, repeated for the experts a pass of T tokens touches (each token picks
+        // ExpertUsed of ExpertCount) with the tokens spread over them; the router and shared expert are ordinary matrices.
+        static double TimeLayer(ModelConfig c, Stage s, int threads, int T)
         {
             Transformer.Threads = threads;
             List<WeightView> mats = new List<WeightView>();
-            foreach (WeightView w in s.Views.Values) if (w.Rows > 1) mats.Add(w);
+            List<int> reps = new List<int>(), toks = new List<int>();
+            foreach (WeightView w in s.Views.Values)
+            {
+                if (w.Rows <= 1) continue;
+                if (w.Experts > 1)
+                {
+                    int touched = Math.Min(w.Experts, T * Math.Max(1, c.ExpertUsed));
+                    mats.Add(w.Slice(0)); reps.Add(touched); toks.Add(Math.Max(1, T * Math.Max(1, c.ExpertUsed) / touched));
+                }
+                else { mats.Add(w); reps.Add(1); toks.Add(T); }
+            }
             Random rng = new Random(1);
             float[][] xs = new float[mats.Count][], ys = new float[mats.Count][];
             for (int i = 0; i < mats.Count; i++)
             {
-                xs[i] = new float[mats[i].Cols * T]; ys[i] = new float[mats[i].Rows * T];
+                xs[i] = new float[mats[i].Cols * toks[i]]; ys[i] = new float[mats[i].Rows * toks[i]];
                 for (int j = 0; j < xs[i].Length; j++) xs[i][j] = (float)(rng.NextDouble() - 0.5);
             }
             double best = double.MaxValue;
             for (int rep = 0; rep < 3; rep++)
             {
                 Stopwatch sw = Stopwatch.StartNew();
-                for (int i = 0; i < mats.Count; i++) Transformer.MatMul(mats[i], xs[i], T, ys[i]);
+                for (int i = 0; i < mats.Count; i++)
+                    for (int r = 0; r < reps[i]; r++) Transformer.MatMul(mats[i], xs[i], toks[i], ys[i]);
                 best = Math.Min(best, sw.Elapsed.TotalSeconds);
             }
             return best;
@@ -423,6 +500,7 @@ Options:
             s.DefaultMaxTokens = Int(o, "max-tokens", 1024, 1, 1 << 20);
             s.Version = version;
             s.ScriptPath = scriptPath;
+            s.AutoStop = !o.ContainsKey("no-auto-stop") && Environment.GetEnvironmentVariable("WINDLASS_AUTO_STOP") != "0";
 
             Backend backend;
             if (o.ContainsKey("stub"))
@@ -487,11 +565,21 @@ Options:
                 string n = GgmlTypes.Name(t.Type);
                 long v; types.TryGetValue(n, out v); types[n] = v + t.SizeBytes;
             }
+            // The biggest layer sets the per-slot RAM (an MoE layer holds every expert, not just the chosen ones).
             long layer = 0;
-            foreach (GgufTensor t in g.Tensors) if (t.Name.StartsWith("blk.0.")) layer += t.SizeBytes;
+            for (int l = 0; l < c.Layers; l++)
+            {
+                long sz = 0;
+                foreach (GgufTensor t in g.Tensors) if (t.Name.StartsWith("blk." + l + ".", StringComparison.Ordinal)) sz += t.SizeBytes;
+                if (sz > layer) layer = sz;
+            }
             Console.WriteLine("name            " + c.Name);
             Console.WriteLine("architecture    " + c.Arch + (c.QkNorm ? " (QK norm)" : "") + (c.TiedEmbeddings ? ", tied embeddings" : ""));
-            Console.WriteLine("layers          " + c.Layers + " x " + (layer / 1e9).ToString("F2") + " GB");
+            Console.WriteLine("layers          " + c.Layers + " x " + (layer / 1e9).ToString("F2") + " GB" + (c.Moe ? " (largest; RAM per layer slot)" : ""));
+            if (c.Moe)
+                Console.WriteLine("experts         " + c.ExpertCount + " per layer, " + c.ExpertUsed + " used per token, ff " + c.ExpertFf
+                    + (c.SharedExpertFf > 0 ? ", shared expert ff " + c.SharedExpertFf : "") + (c.ExpertWeightsNorm ? ", weights renormalised" : "")
+                    + " (not logit-checked against llama.cpp)");
             Console.WriteLine("weights         " + (g.TotalBytes / 1e9).ToString("F2") + " GB in " + g.Paths.Count + " file(s)");
             Console.Write("types          ");
             foreach (KeyValuePair<string, long> kv in types) Console.Write(" " + kv.Key + " " + (kv.Value / 1e9).ToString("F2") + " GB;");

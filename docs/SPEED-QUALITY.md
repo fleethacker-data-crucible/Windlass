@@ -1,7 +1,9 @@
 # Speed and quality
 
-**Status: design, part built.** Windlass measures speed (`playbook probe`) and quality (`playbook eval`) on the
-machine it runs on. The dial that trades one for the other is planned for Fairlead and described here.
+**Status: built in Windlass, the dial still planned.** Windlass measures speed (`playbook probe`), quality
+(`playbook eval`) and context fidelity (`playbook fidelity`) on the machine it runs on, and publishes them in
+`GET /v1/models` ([API.md](API.md#measured-numbers-in-v1models)). The dial that trades one for the other is planned for
+Fairlead and described here.
 
 ## Two kinds of speed-up
 
@@ -21,11 +23,24 @@ Rule: free speed-ups are always on where they pay; costly ones happen only when 
   is better. It compares quantizations of one model, and models that share a tokenizer (Llama 3.2 3B and Llama 3.3
   70B do). It does not capture everything a person means by quality (reasoning, following instructions), so treat it
   as a floor check: a large jump means real damage.
-- **Context fidelity**, planned: a short version of the stress test's long-conversation phase (facts planted in a
-  log, recalled later), scored as recalls correct. This is the check that would catch context compression losing
-  details.
+- **Context fidelity** (`playbook fidelity`): a short version of the stress test's long-conversation phase (phase 6:
+  facts in a ship's log, asked about later), scored as recalls correct. Windlass builds a synthetic log (original text,
+  every name, number and code invented; deterministic from a seed and sized to a token budget) with N planted facts,
+  then asks one question per fact through the normal chat path, greedy with at most 24 reply tokens. A recall counts when
+  the reply contains the planted value as whole words (case, punctuation and thousands separators ignored; a first
+  name alone does not recall a full name). The score, `correct of total`, is kept in the playbook with the log's token
+  count and the check's version. This is the check that would catch context compression losing details.
+  - **Small by default** (4 facts, about 300 tokens of prompt) because a prompt costs real time on a CPU; a long
+    budget (`--tokens 3000`) is slow (about an hour on a 70B model at the stress test's 1.2 s per prompt token) and is
+    for the owner of the machine to run when it can be spared. A short log says little about a long conversation:
+    compare scores only at the same facts and token budget.
+  - **Not parity-checked against anything.** The check is new; no other tool computes this score. A tiny random model
+    recalls nothing (chance for free recall is close to zero), so the tests prove the machinery (scoring, the
+    generator, recording, publishing), not the quality of any model. Unmeasured: how scores of real models compare, and
+    how they move with log length.
 
-Each candidate (model file and settings) then has a measured speed and a measured quality on this machine.
+Each candidate (model file and settings) then has a measured speed, quality and fidelity on this machine, and
+`GET /v1/models` carries them (`null` where never measured), so Fairlead can choose without guessing.
 
 ## The dial (planned, in Fairlead)
 
@@ -39,8 +54,9 @@ quality | balanced | speed`, or a default on a client key):
 | `speed` | The fastest candidate that still passes a minimum quality floor |
 
 Fairlead already chooses between models (Ollama on the GPU, Windlass on the CPU), so it is the natural place for the
-dial. Windlass's part is to publish its measured numbers, for example in `GET /v1/models`, so Fairlead can choose
-without guessing. `deep-local` always stays on the big model, so a person can always get the slow, careful answer.
+dial, and the dial itself is still planned (nothing in Windlass or Fairlead implements it yet). Windlass's part is built:
+it publishes its measured numbers in `GET /v1/models` (seconds per token and per prompt token, predicted and observed,
+the limiting resource, perplexity, context fidelity), so Fairlead can choose without guessing. `deep-local` always stays on the big model, so a person can always get the slow, careful answer.
 
 ## A small model on the GPU
 
@@ -53,12 +69,13 @@ Three ways a tiny always-on GPU model could help, from safest to riskiest:
 2. **Triage (costly, small risk):** the tiny model judges whether a question needs the big model. Only route away
    when it is very sure; `deep-local` always reaches the big model.
 3. **Context compression (costly, real risk):** the tiny model shortens a long document before the big model reads
-   it. Cuts prompt time sharply, but can drop details. Opt-in only, and only with the context-fidelity check above.
+   it. Cuts prompt time sharply, but can drop details. Opt-in only, and only with the context-fidelity check above
+   (which exists; the compression does not).
 
 ## Order of work
 
 1. Done: free speed-ups in the playbook (pinning, fp16 KV, threads, guess-ahead with a measured on/off).
 2. Done: `playbook eval` (perplexity and prompt speed).
-3. Next in Windlass: a faster batch path (cheaper guess checking and much faster prompts), then the context-fidelity
-   check, then publishing speed and quality in `/v1/models`.
-4. In Fairlead: the dial, then the GPU drafter through a "check these guesses" API.
+3. Done: the context-fidelity check (`playbook fidelity`), and speed, quality and fidelity published in `/v1/models`.
+4. Next in Windlass: a faster batch path (cheaper guess checking and much faster prompts).
+5. In Fairlead: the dial, then the GPU drafter through a "check these guesses" API.

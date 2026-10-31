@@ -16,6 +16,7 @@ namespace Windlass.Tests
     public static partial class Runner
     {
         static string _fixtures, _temp;
+        internal static string TempDir { get { return _temp; } }   // for test files that live in their own file (MoeTests.cs)
         static int _failed, _passed;
 
         public static int Main(string[] args)
@@ -47,6 +48,12 @@ namespace Windlass.Tests
                 Add(tests, "engine: logits match llama.cpp for every weight type and architecture", LogitsMatchLlamaCpp);
                 Add(tests, "engine: streamed, prefetched and resident layers give identical logits", StreamingIsExact);
                 Add(tests, "engine: KV cache (one token at a time) matches a full pass", KvCacheMatchesFullPass);
+                Add(tests, "quants: iquant tables are the ggml-common.h data", IQuantTests.Tables);
+                Add(tests, "quants: iquant decoders match an independent re-derivation of ggml-quants.c", IQuantTests.Decoders);
+                Add(tests, "quants: iquant block, row and tensor sizes", IQuantTests.Sizes);
+                Add(tests, "quants: iquant weights work through the generic decode-then-dot matmul", IQuantTests.MatMul);
+                Add(tests, "engine: iquant models load and streamed, prefetched and resident logits are identical", IQuantTests.Streaming);
+                Add(tests, "engine: iquant KV cache (one token at a time) matches a full pass", IQuantTests.KvCache);
                 Add(tests, "engine: generation is deterministic and reuses the cached prompt prefix", GenerationAndPrefixReuse);
                 Add(tests, "engine: stop sequences, max_tokens and context limit", GenerationLimits);
                 Add(tests, "engine: guess-ahead keeps the same greedy reply and keeps right guesses", GuessAheadIsExact);
@@ -59,6 +66,7 @@ namespace Windlass.Tests
                 Add(tests, "stop scanner holds back partial stop sequences", StopScannerWorks);
                 Add(tests, "sampler: greedy, seeded and top_p", SamplerWorks);
                 Add(tests, "cli: argument parsing", CliArgs);
+                Add(tests, "cli and api: docs/CLI-API-PARITY.md names every command and route", CliApiParityDocs);
                 Add(tests, "playbook: machine facts from Start-Windlass", PlaybookFacts);
                 Add(tests, "playbook: rules fit a desktop, a laptop on battery and a small machine", PlaybookRules);
                 Add(tests, "playbook: measurements pick threads and predict speed", PlaybookMeasured);
@@ -66,6 +74,8 @@ namespace Windlass.Tests
                 Add(tests, "playbook: saved, reused only on the same machine and model, and applied by the CLI", PlaybookSavedAndApplied);
                 Add(tests, "cli: commands and playbook show print versioned JSON; --out writes UTF-8 without a BOM", CliJson);
                 Add(tests, "api: models, health and fleethacker id", ApiBasics);
+                Add(tests, "presence: the stop rule (fake clock): arming, timeout, leaving, reload, several clients, busy", PresenceRules);
+                Add(tests, "api: heartbeat route and auto-stop (fake clock): header, arming, silence, never mid-generation, off switch", ApiHeartbeat);
                 Add(tests, "api: non-streaming reply with usage", ApiPlain);
                 Add(tests, "api: streaming chunks, usage chunk and [DONE]", ApiStream);
                 Add(tests, "api: request errors have OpenAI shapes and real status codes", ApiErrors);
@@ -76,12 +86,21 @@ namespace Windlass.Tests
                 Add(tests, "api: client disconnect cancels the generation", ApiCancelOnDisconnect);
                 Add(tests, "api: Host and Origin checks", ApiHostOrigin);
                 Add(tests, "api: a real model end to end", ApiRealModel);
+                Add(tests, "fidelity: scoring is right on hand-made replies", FidelityScoring);
+                Add(tests, "fidelity: the log is deterministic, scales with the budget and never plants duplicate answers", FidelityGenerator);
+                Add(tests, "fidelity: the whole check scores a backend that answers from the log, asks greedily and honours cancel", FidelityPipeline);
+                Add(tests, "fidelity: playbook fidelity records a score on a tiny model and playbook show prints it", FidelityCli);
+                Add(tests, "api: /v1/models carries the windlass extension (null when unmeasured, numbers once measured)", ApiModelFacts);
+                Add(tests, "api: /v1/models from a real tiny model after probe, eval, fidelity and runs, without the engine lock", ApiModelFactsReal);
+                MoeTests.Register(tests);
+                ArchTests.Register(tests);
                 Add(tests, "batch: ForwardBatch gives the logits of separate runs, at different lengths", BatchForwardMatchesSingle);
                 Add(tests, "batch: N sequences stepped together read the model once per step, not N times", BatchReadsModelOncePerStep);
                 Add(tests, "batch: concurrent generations match single ones; prefix reuse per slot; batch 1 unchanged", BatchedBackendMatchesSingle);
                 Add(tests, "batch: concurrent API requests match sequential ones; a hang-up leaves the others alone", BatchApiConcurrency);
                 Add(tests, "batch: concurrent requests share the reads of the model", BatchRequestsShareReads);
                 Add(tests, "batch: RAM check, option validation and the scheduler's turns", BatchLimits);
+                Add(tests, "batch: batched steps match single steps for MoE, Granite and OLMo 2 models and with --int-dot", BatchMeetsNewModelsAndIntDot);
                 Add(tests, "fairlead route: model list (id and context length)", FairleadModelList);
                 Add(tests, "fairlead route: a non-stream request with Fairlead's headers and body", FairleadNonStream);
                 Add(tests, "fairlead route: stream with usage, early headers and keepalives", FairleadStream);

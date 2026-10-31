@@ -9,6 +9,7 @@ Launch-Windlass.bat run   --model D:\models\model.gguf --prompt "Hi"   :: one re
 Launch-Windlass.bat playbook probe --model D:\models\model.gguf        :: measure this computer, write its playbook
 Launch-Windlass.bat playbook show  --model D:\models\model.gguf        :: the settings serve and run would use now, and why
 Launch-Windlass.bat playbook eval  --model D:\models\model.gguf        :: quality score (perplexity) and prompt speed
+Launch-Windlass.bat playbook fidelity --model D:\models\model.gguf     :: context fidelity: facts planted in a short log, recalled
 Launch-Windlass.bat commands --json                                    :: every command, for scripts and agents
 Launch-Windlass.bat check                                              :: locality checks and compile only
 Launch-Windlass.bat help                                               :: every option
@@ -47,8 +48,24 @@ better; compare quantizations of one model, or models that share a tokenizer) an
 score is kept in the playbook and shown by `playbook show`. How speed and quality are meant to trade off is in
 [SPEED-QUALITY.md](SPEED-QUALITY.md).
 
-`--json` on `playbook probe`, `playbook show`, `playbook eval` and `commands` prints a versioned JSON document (`windlass.playbook/1`,
-`windlass.commands/1`), and `--out <file>` writes it as UTF-8 without a BOM, so scripts and agents can use them
+`playbook fidelity` checks that the model still finds details in a long context (the same idea as the stress test's
+long-conversation phase, in miniature). It writes a synthetic ship's log (original text; every name, number and code is
+invented, and the same `--seed` gives the same log), plants `--facts` facts in it (default 4: a person, a quantity, a
+code and a place, in turn), then asks one question per fact through the normal chat path: greedy, 24 reply tokens at most.
+A reply scores when it contains the planted value as whole words (case, punctuation and thousands separators
+ignored; "Odile" does not recall "Odile Marrick"). The log is sized against the model's own tokenizer to about
+`--tokens` prompt tokens (default 300; if the facts alone need more, the shortest possible log is used and the real
+size is reported). `--questions <k>` asks only the first k. The result, `n of N recalled`, is kept in the playbook next to the
+perplexity and shown by `playbook show`; `--json` prints `windlass.fidelity/1` with every question, planted value and reply.
+
+Keep it small: the log is read as a prompt, which costs real time on a CPU (about 1.2 s per token for a 70B Q4_K_M model
+on the dev desktop in the stress test, so 300 tokens is several minutes and about 3,000 is an hour; later questions reuse the cached
+log). Long budgets are for you to run when you can spare the machine; a short log says little about a long
+conversation. A tiny random model recalls nothing (chance for free recall is close to zero), so the tests prove the
+machinery, not model quality.
+
+`--json` on `playbook probe`, `playbook show`, `playbook eval`, `playbook fidelity` and `commands` prints a versioned JSON document (`windlass.playbook/1`,
+`windlass.quality/1`, `windlass.fidelity/1`, `windlass.commands/1`), and `--out <file>` writes it as UTF-8 without a BOM, so scripts and agents can use them
 (see the Fleet CLI parity proposal). Exit code 0 is success, 1 an error, 2 a usage error.
 
 ## Batching
@@ -93,6 +110,7 @@ under a streamed 70B model, where every token costs a full read of the file, tha
 | `--max-tokens` | `1024` | `max_tokens` for requests that give none. |
 | `--max-queue` | `8` | Requests that may wait behind the running one; more get `503 server_busy`. |
 | `--keepalive` | `15` | Seconds between SSE `: keepalive` comments (under 60). |
+| `--no-auto-stop` | off | Do not stop when the programs that sent heartbeats are gone (also `WINDLASS_AUTO_STOP=0`). See [LIFECYCLE.md](LIFECYCLE.md). |
 | `--stub` | off | Serve a canned reply with no model, to test wiring. |
 | `--verbose` | off | Log every layer. |
 
@@ -100,11 +118,40 @@ under a streamed 70B model, where every token costs a full read of the file, tha
 
 GGUF files of the `llama` (Llama 2, Llama 3.x, Mistral 7B, Mistral Large and other Llama-layout models), `qwen2`
 (Qwen2, Qwen2.5) and `qwen3` (dense Qwen3) architectures, in F32, F16, BF16, Q8_0, Q5_0, Q5_1, Q4_0, Q4_1, Q6_K,
-Q5_K, Q4_K, Q3_K or Q2_K (so the usual `Q8_0`, `Q6_K`, `Q5_K_M`, `Q4_K_M`, `Q3_K_M` and `Q2_K` files).
+Q5_K, Q4_K, Q3_K or Q2_K (so the usual `Q8_0`, `Q6_K`, `Q5_K_M`, `Q4_K_M`, `Q3_K_M` and `Q2_K` files), or in the
+I-quants IQ4_NL, IQ4_XS, IQ3_XXS, IQ3_S, IQ2_XXS, IQ2_XS, IQ2_S, IQ1_S or IQ1_M (the `IQ*` files).
 
-Not yet: mixture-of-experts models, I-quants (`IQ*`), vision models, and other architectures (Gemma is Phoenix's
-job; `qwen35` is not supported yet). Windlass says so and refuses them at load.
+The I-quant decoders are ports of llama.cpp's `dequantize_row_iq*` and are tested against an independent re-derivation
+of the block layouts, and for exact agreement between the streamed, prefetched and resident paths on tiny models. They
+are **not yet checked against llama.cpp**: there is no llama.cpp on the development machine. To verify, run one real
+IQ model (for example an IQ4_XS or IQ3_S file) through Windlass and llama.cpp with the same prompt at temperature 0 and
+compare the logits or the first tokens. I-quants have no fused dot kernel, so each token decodes a row and then dots it
+(like Q2_K and Q3_K); their speed is unmeasured.
 
+Mixture-of-experts GGUF files in the layouts llama.cpp writes (stacked `ffn_*_exps` tensors): Mixtral-style
+(`llama`, or `mixtral`, with `expert_count`), `qwen2moe` (adds the shared expert) and `qwen3moe` (QK norm, may keep
+some layers dense). The router is a softmax over all experts, the best `expert_used_count` run, and their weights are
+renormalised to sum to 1 for Mixtral and Qwen3-MoE but not for Qwen2-MoE (llama.cpp's `build_moe_ffn`; an
+`expert_weights_norm` key in the file wins). Only the chosen experts compute, which saves compute, not disk reads:
+a layer is still read whole, so RAM per layer slot is the size of all its experts and the disk-bound speed of a model
+bigger than RAM does not improve. `info` shows the experts per layer; `playbook probe` times one layer with the
+experts a token touches. Older files with one `ffn_gate.N.weight` tensor per expert are refused.
+
+MoE is **not parity-checked against llama.cpp** (there is no llama.cpp on the build machine): it is tested against a
+float reference written independently in `tests\MoeTests.cs`. Check a real small MoE file (for example
+Qwen3-30B-A3B) against llama.cpp's logits before relying on it.
+
+`granite` (Granite 3 dense: the Llama graph plus `embedding_scale`, `residual_scale`, `attention.scale` and
+`logit_scale` from the file, as llama.cpp applies them) and `olmo2` (OLMo 2: no norm before attention or the FFN, the
+attention and FFN outputs are normalised before the residual add, Q and K are normalised over their whole vectors,
+NEOX RoPE). Both are checked only against a float reference written in `tests\ArchTests.cs`, not against llama.cpp,
+and neither has its chat template or pre-tokenizer built in: Granite (`refact`) and OLMo 2 (`dbrx`) fall back to the
+GPT-2 pre-tokenizer rules with a warning, and the chat template falls back to ChatML, which is wrong for both. Treat
+them as experimental until a real file has been compared with llama.cpp and the templates are added. Granite MoE and
+the hybrid Granite 4 (`granitehybrid`) are not supported.
+
+Not yet: vision models, and other architectures (Gemma is Phoenix's job; `qwen35` is not supported yet). Windlass says so and refuses
+them at load.
 ## Requirements
 
 | Needs | |

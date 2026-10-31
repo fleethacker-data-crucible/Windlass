@@ -20,7 +20,8 @@ namespace Windlass
     {
         F32 = 0, F16 = 1, Q4_0 = 2, Q4_1 = 3, Q5_0 = 6, Q5_1 = 7, Q8_0 = 8, Q8_1 = 9,
         Q2_K = 10, Q3_K = 11, Q4_K = 12, Q5_K = 13, Q6_K = 14, Q8_K = 15,
-        I8 = 24, I16 = 25, I32 = 26, I64 = 27, F64 = 28, BF16 = 30
+        IQ2_XXS = 16, IQ2_XS = 17, IQ3_XXS = 18, IQ1_S = 19, IQ4_NL = 20, IQ3_S = 21, IQ2_S = 22, IQ4_XS = 23,
+        I8 = 24, I16 = 25, I32 = 26, I64 = 27, F64 = 28, IQ1_M = 29, BF16 = 30
     }
 
     public static class GgmlTypes
@@ -50,6 +51,15 @@ namespace Windlass
                 case GgmlType.Q5_K: blockSize = 256; typeSize = 176; return true;
                 case GgmlType.Q6_K: blockSize = 256; typeSize = 210; return true;
                 case GgmlType.Q8_K: blockSize = 256; typeSize = 292; return true;
+                case GgmlType.IQ2_XXS: blockSize = 256; typeSize = 66;  return true;
+                case GgmlType.IQ2_XS:  blockSize = 256; typeSize = 74;  return true;
+                case GgmlType.IQ3_XXS: blockSize = 256; typeSize = 98;  return true;
+                case GgmlType.IQ1_S:   blockSize = 256; typeSize = 50;  return true;
+                case GgmlType.IQ4_NL:  blockSize = 32;  typeSize = 18;  return true;
+                case GgmlType.IQ3_S:   blockSize = 256; typeSize = 110; return true;
+                case GgmlType.IQ2_S:   blockSize = 256; typeSize = 82;  return true;
+                case GgmlType.IQ4_XS:  blockSize = 256; typeSize = 136; return true;
+                case GgmlType.IQ1_M:   blockSize = 256; typeSize = 56;  return true;
             }
             blockSize = 0; typeSize = 0;
             return false;
@@ -84,6 +94,11 @@ namespace Windlass
         }
         public int Cols { get { return (int)Dims[0]; } }
         public int Rows { get { return (int)(ElementCount / Dims[0]); } }
+        // Stacked expert tensors (MoE) are [cols, rows, experts]: Experts is 1 for ordinary 2-D weights, and Rows counts
+        // every expert's rows. Expert e starts at row e * ExpertRows, i.e. byte e * ExpertBytes.
+        public int Experts { get { long n = 1; for (int i = 2; i < Dims.Length; i++) n *= Dims[i]; return (int)n; } }
+        public int ExpertRows { get { return Rows / Experts; } }
+        public long ExpertBytes { get { return SizeBytes / Experts; } }
     }
 
     public sealed class GgufModelFile
