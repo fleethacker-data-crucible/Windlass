@@ -3,6 +3,7 @@
 ## Unreleased
 
 - `docs/CLI-API-PARITY.md`: every Windlass command and API route against the Fleet CLI parity proposal, with the gaps stated (`info` and `run` have no `--json`, no per-session token file, no generated route list). A test keeps the page in step with `commands --json` and the routes.
+- Tests for the Fairlead `deep-local` route contract (`testsFairleadRouteTests.cs`): model list, non-stream and stream requests shaped like Fairlead's, failover statuses, client key, loopback hosts and the port block. `docs/API.md` lists which checklist items are covered and which are hand checks.
 - Faster CPU math (`src/FastMath.cs`): prompts use a register-blocked kernel (4 weight rows x 2 tokens per pass; 1.39x faster than the old kernel in a single-thread microbenchmark on the dev desktop, unmeasured on real models), and `--int-dot` runs Q8_0, Q4_0, Q4_K, Q5_K and Q6_K with integer dot products on Q8 activations, as llama.cpp does. `--int-dot` is off by default until it is timed on a real model. A token's logits do not depend on how many tokens run beside it.
 
 - `playbook eval`: quality score (perplexity on a built-in passage written for the test (so no model has memorised it)) and prompt seconds per token, kept in the playbook; `docs/SPEED-QUALITY.md` sets out free vs costly speed-ups and the planned speed/quality dial.

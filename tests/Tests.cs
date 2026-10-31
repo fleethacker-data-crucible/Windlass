@@ -77,6 +77,12 @@ namespace Windlass.Tests
                 Add(tests, "api: client disconnect cancels the generation", ApiCancelOnDisconnect);
                 Add(tests, "api: Host and Origin checks", ApiHostOrigin);
                 Add(tests, "api: a real model end to end", ApiRealModel);
+                Add(tests, "fairlead route: model list (id and context length)", FairleadModelList);
+                Add(tests, "fairlead route: a non-stream request with Fairlead's headers and body", FairleadNonStream);
+                Add(tests, "fairlead route: stream with usage, early headers and keepalives", FairleadStream);
+                Add(tests, "fairlead route: busy, loading, unknown model and bad request give the statuses Fairlead fails over on", FairleadFailoverStatuses);
+                Add(tests, "fairlead route: the client key as a Bearer token", FairleadClientKey);
+                Add(tests, "fairlead route: loopback addresses only, and the port block", FairleadAddressAndPortBlock);
                 foreach (KeyValuePair<string, Action> t in tests)
                 {
                     if (filter != null && t.Key.IndexOf(filter, StringComparison.OrdinalIgnoreCase) < 0) continue;
