@@ -36,3 +36,22 @@ is ignored.
   the request ends. A client that heartbeats again in the meantime keeps it alive.
 
 The rule is `src\Presence.cs`; tests drive it with a fake clock (`tests\PresenceTests.cs`).
+
+## The tray icon
+
+`serve --open` in a desktop session shows a notification-area icon (`src\Tray.ps1`) and starts the engine with `--tray`.
+With the icon, rule 1 changes for the UI tab: the browser tab does **not** own the server. Closing the window or the
+tab leaves the engine and the loaded model running, because Fairlead and other programs call the local API. The icon
+owns the engine's life instead:
+
+| Icon action | Effect |
+| --- | --- |
+| Double-click, or *Open Windlass* | Opens the UI in an Edge or Chrome `--app` window (the default browser if neither is installed) |
+| Status line (disabled) and tooltip | `Running on 127.0.0.1:PORT, model: NAME` (`none` when idle, `loading NAME` while a model loads) |
+| *Quit Windlass* | Asks once ("programs that use it will stop working"), then stops the engine, unloads the model, removes the runtime file and the icon |
+
+Other ways out still work and remove the icon: *End session* in the UI, `src\Stop-Windlass.ps1`, Ctrl+C in the console.
+Starting Windlass again finds the running instance (the Fleet `/__fleethacker/id` check) and only reopens the window.
+`--no-tray` restores the old behaviour (the tab owns the server). Programs that send heartbeats (Fairlead) can still own
+the engine as before; the tab's heartbeats are simply ignored in tray mode. Closing the console window that shows the
+log ends the process, so use *Quit* or minimise it.

@@ -53,6 +53,8 @@ Options:
   --open                  serve: open the browser UI, and stop when its tab closes (the tab owns the server; add
                           --no-auto-stop to keep serving after it closes). Without --open the UI is still at the
                           server's address, but closing it never stops the server
+  --tray / --no-tray      serve --open: Start-Windlass.ps1 shows a notification-area icon and passes --tray, so the engine keeps
+                          running when the browser closes until you choose Quit on the icon (--no-tray: the tab owns it)
   --no-ui                 serve: the API only, no browser UI
   --guess / --no-guess    guess-ahead for greedy replies on or off (default: the playbook's choice, else off)
   --batch <n>             serve: let up to n requests generate together, one pass over the layers per step for all
@@ -114,7 +116,7 @@ Options:
             }
         }
 
-        static readonly string[] Flags = { "int-dot", "no-auto-stop", "no-prefetch", "no-playbook", "stub", "verbose", "json", "guess", "no-guess", "open", "no-ui" };
+        static readonly string[] Flags = { "int-dot", "no-auto-stop", "no-prefetch", "no-playbook", "stub", "verbose", "json", "guess", "no-guess", "open", "no-ui", "tray", "no-tray" };
 
         public static Dictionary<string, string> ParseArgs(string[] args, int from)
         {
@@ -407,7 +409,7 @@ Options:
         // commands: the CLI describes itself, so an agent can find every command and its inputs and outputs.
         static readonly string[][] CommandList =
         {
-            new[] { "serve", "--model [--model-id --port --api-key --context-length --cache-gb --no-prefetch --threads --int-dot --guess --no-guess --batch --no-playbook --chat-template --max-tokens --max-queue --keepalive --no-auto-stop --open --no-ui --stub --verbose]", "an OpenAI-compatible server and browser UI on 127.0.0.1 (see docs/API.md)" },
+            new[] { "serve", "--model [--model-id --port --api-key --context-length --cache-gb --no-prefetch --threads --int-dot --guess --no-guess --batch --no-playbook --chat-template --max-tokens --max-queue --keepalive --no-auto-stop --open --tray --no-tray --no-ui --stub --verbose]", "an OpenAI-compatible server and browser UI on 127.0.0.1 (see docs/API.md)" },
             new[] { "run", "--model --prompt [--system --max-tokens --temperature and the serve options above]", "one reply in the console" },
             new[] { "info", "--model", "the model's shape, sizes and RAM needs (text)" },
             new[] { "playbook probe", "--model [--model-id --json --out]", "windlass.playbook/1: machine, measurements, settings, rules; saved in playbooks\\" },
@@ -500,6 +502,18 @@ Options:
             return best;
         }
 
+        // serve --open makes the browser tab own the server (closing it stops Windlass), unless the tray icon holds the server
+        // (--tray, which Start-Windlass.ps1 passes while it shows the icon): then the engine stays up until Quit or End session.
+        public static bool UiOwnsServer(Dictionary<string, string> o, bool hasUi)
+        {
+            return o.ContainsKey("open") && hasUi && !o.ContainsKey("tray");
+        }
+
+        // What the tray icon (TrayHost.cs) reads: the running server and its backend, null when none.
+        internal static volatile ApiServer LiveServer;
+        internal static volatile Backend LiveBackend;
+        internal static volatile int LivePort;
+
         static int Serve(Dictionary<string, string> o, string root, string scriptPath, string version)
         {
             ServerSettings s = new ServerSettings();
@@ -514,7 +528,7 @@ Options:
             s.AutoStop = !o.ContainsKey("no-auto-stop") && Environment.GetEnvironmentVariable("WINDLASS_AUTO_STOP") != "0";
             string uiRoot = Path.Combine(root, "ui", "dist");
             if (!o.ContainsKey("no-ui") && Directory.Exists(uiRoot)) s.UiRoot = uiRoot;
-            s.UiOwnsLife = o.ContainsKey("open") && s.UiRoot != null;
+            s.UiOwnsLife = UiOwnsServer(o, s.UiRoot != null);
             s.Batch = o.ContainsKey("batch") ? Int(o, "batch", 1, 1, BatchPlan.MaxBatch) : 1;
             s.Stub = o.ContainsKey("stub");
             s.RecentFile = Path.Combine(root, "playbooks", "recent-models.txt");
@@ -554,6 +568,7 @@ Options:
             using (ApiServer server = new ApiServer(backend, s))
             {
                 server.Start();
+                LiveServer = server; LiveBackend = backend; LivePort = s.Port;
                 Dictionary<string, object> rt = new Dictionary<string, object>();
                 rt["pid"] = pid; rt["port"] = s.Port; rt["url"] = "http://127.0.0.1:" + s.Port + "/v1";
                 rt["started"] = DateTime.UtcNow.ToString("o");
@@ -565,6 +580,7 @@ Options:
                 if (string.IsNullOrEmpty(s.ApiKey)) Log.Info("No API key set: any program on this PC can use the model.");
                 Console.CancelKeyPress += delegate(object sender, ConsoleCancelEventArgs e) { e.Cancel = true; Log.Info("stopping"); server.Stop(); };
                 server.Stopped.WaitOne();
+                LiveServer = null;
             }
             backend.Dispose();
             try { File.Delete(runtimeFile); } catch (IOException) { }

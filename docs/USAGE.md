@@ -96,7 +96,7 @@ under a streamed 70B model, where every token costs a full read of the file, tha
 
 `--model` is optional for `serve`: without it Windlass starts empty and the browser UI loads (and later swaps) the model ([UI.md](UI.md#loading-and-swapping-a-model)).
 
-The browser UI ([UI.md](UI.md)): `--open` opens it and lets its tab own the server (closing the tab stops Windlass, never mid-reply; add `--no-auto-stop` to keep serving), `--no-ui` serves the API only.
+The browser UI ([UI.md](UI.md)): `--open` opens it and shows a tray icon; the engine keeps running when the window closes and stops on *Quit Windlass* on the icon ([LIFECYCLE.md](LIFECYCLE.md#the-tray-icon)). `--no-tray` puts the tab in charge instead (closing it stops Windlass, never mid-reply; add `--no-auto-stop` to keep serving). `--no-ui` serves the API only.
 
 | Option | Default | What it does |
 | --- | --- | --- |

@@ -74,6 +74,8 @@ namespace Windlass.Tests
                 Add(tests, "playbook: saved, reused only on the same machine and model, and applied by the CLI", PlaybookSavedAndApplied);
                 Add(tests, "cli: commands and playbook show print versioned JSON; --out writes UTF-8 without a BOM", CliJson);
                 Add(tests, "api: models, health and fleethacker id", ApiBasics);
+                Add(tests, "tray: --tray keeps the engine up when the browser tab is gone; --open alone does not", TrayOwnership);
+                Add(tests, "tray: the engine runs behind the icon, reports its status, and Quit stops it and removes its runtime file", TrayEngineOutlivesTheBrowser);
                 Add(tests, "presence: the stop rule (fake clock): arming, timeout, leaving, reload, several clients, busy", PresenceRules);
                 Add(tests, "api: heartbeat route and auto-stop (fake clock): header, arming, silence, never mid-generation, off switch", ApiHeartbeat);
                 Add(tests, "api: non-streaming reply with usage", ApiPlain);
