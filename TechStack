@@ -1,0 +1,30 @@
+# Tech stack
+
+Windlass is a local server with a browser UI: Windows PowerShell 5.1 starts a C# engine that serves both on `127.0.0.1`.
+
+## Use
+
+| Layer | Choice |
+| --- | --- |
+| Launcher | `Launch-Windlass.bat` -> `powershell.exe -STA -File src\Start-Windlass.ps1` |
+| Engine and local server | C# 5 (.NET Framework 4.8), shipped as source and compiled at start by Windows PowerShell 5.1 `Add-Type`; `HttpListener` on `http://127.0.0.1:<port>/` and `http://localhost:<port>/`, `Host` and `Origin` checked on every request (`src/Server.cs`, the only file that may open a listener) |
+| UI | Svelte 5 + TypeScript |
+| Styling | Tailwind CSS 4 on the shared `--fl-*` tokens (`ui-src/vendor/fleet/fleet.css`), Lucide icons |
+| Storage | `localStorage` for settings (`windlass-*` keys), `sessionStorage` for an API key; chats stay in memory. No IndexedDB: Windlass keeps no user data |
+| Charts, WebAssembly, service workers | Not used |
+| Machine playbook | `playbooks\*.json` (`windlass.playbook/1`), per computer, not in git |
+
+## Local server note
+
+`HttpListener` on loopback prefixes, as allowed in the team repo's `docs/LISTENER-EVALUATION.md`; never `+`, `*` or a host name. Port block 8777-8779, policy `exclusive` (`src/FleetPorts.psd1`, `GET /__fleethacker/id`). The UI is served by the same listener from `ui\dist`, by exact URL match, with a Content-Security-Policy of this origin only.
+
+## Build rules
+
+- The UI is built off the workstation (`cd ui-src && npm ci && npm run build` -> `ui\dist`); only compiled JS, CSS, SVG, PNG and ICO are committed or shipped. The workstation needs no Node.
+- No prebuilt DLLs, no NuGet packages, no CDN, no runtime network call; framework assemblies only. `Start-Windlass.ps1` fails the start when the C# uses a socket, web client, process start, P/Invoke or assembly load.
+- No admin, installers or services.
+- Models (`.gguf`) are never committed or shipped; Windlass reads files and downloads nothing.
+
+## Lifecycle rules
+
+See `docs/LIFECYCLE.md`. With `serve --open` the browser tab owns the server (`POST /api/heartbeat` every 5 s, a leaving beacon on `pagehide`; stop 20 s after the last heartbeat or 5 s after leaving, never mid-reply). Without `--open`, no tab stops it. *End session* in the UI, `src\Stop-Windlass.ps1`, `logs\windlass-server-<pid>.json` per running server, `WINDLASS_AUTO_STOP=0` / `--no-auto-stop` as the off switch.

@@ -1,7 +1,7 @@
 #requires -Version 5.1
 <#
 .SYNOPSIS
-  Renders the brand assets made from source: the mark as PNG, favicon.ico, and the placeholder emblems.
+  Renders the brand assets made from source: the mark as PNG, favicon.ico, and (only while assets\brand\emblem-source.html exists) the placeholder emblems.
 .DESCRIPTION
   Build-machine only. Uses headless Edge (or Chrome) to render assets\brand\mark.svg to PNG with a transparent
   background, then packs PNG frames into favicon.ico. The emblem step renders assets\brand\emblem-source.html (the

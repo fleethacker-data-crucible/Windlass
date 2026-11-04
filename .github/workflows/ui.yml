@@ -1,0 +1,36 @@
+name: Windlass UI
+on:
+  push:
+    branches: [main]
+    paths: ['ui-src/**', 'ui/**', '.github/workflows/ui.yml']
+  pull_request:
+    paths: ['ui-src/**', 'ui/**', '.github/workflows/ui.yml']
+permissions:
+  contents: read
+jobs:
+  ui:
+    name: windlass-ui
+    # Linux runner: Node and npm are used here, never on the workstation. Python/bash are fine on Linux runners (STANDARDS.md, CI shells).
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Install, check, test and build the UI
+        working-directory: ui-src
+        env:
+          GITHUB_TOKEN: ''
+          GH_TOKEN: ''
+        run: |
+          set -e
+          node --version
+          npm ci --no-audit --no-fund
+          npm run check
+          npm test
+          npm run build
+      - name: ui/dist is the build of ui-src
+        run: |
+          # The committed ui/dist must be what the source builds to: file names carry content hashes.
+          git status --porcelain ui/dist
+          test -z "$(git status --porcelain ui/dist)" || { echo 'ui/dist is out of date: run npm run build in ui-src and commit it'; exit 1; }

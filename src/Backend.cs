@@ -54,6 +54,10 @@ namespace Windlass
         // out and published as null. Must not wait for a running generation.
         public virtual Dictionary<string, object> Facts() { return new Dictionary<string, object>(); }
 
+        // The machine playbook as a windlass.playbook/1 JSON document, for the browser UI; null when there is none (set by
+        // hand, --no-playbook, or a stub). Must not wait for a running generation.
+        public virtual string PlaybookJson() { return null; }
+
         public virtual void Dispose() { }
     }
 

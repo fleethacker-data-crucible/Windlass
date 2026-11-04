@@ -14,3 +14,6 @@ models/
 *.gguf
 # machine playbooks are per computer
 playbooks/
+# the UI's build tools; its compiled output ui/dist is committed
+node_modules/
+ui-src/test-results/

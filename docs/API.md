@@ -14,6 +14,7 @@ Windlass serves an OpenAI-compatible API on **`http://127.0.0.1:8777/v1`** (the 
   with a `windlass` object of measured numbers (below).
 - **`GET /health`**: `status` (`loading`, `ready`, `error`), `busy`, `queued`.
 - **`GET /__fleethacker/id`** and **`POST /__fleethacker/shutdown`**: the suite's self-detection endpoints.
+- **`GET /`** and its files: the browser UI ([UI.md](UI.md)). **`/api/session`, `/api/status`, `/api/playbook`, `/api/logs`, `/api/heartbeat`, `/api/shutdown`**: the routes behind it (below). They answer this server's own pages, not other programs.
 
 ## Measured numbers in `/v1/models`
 
@@ -54,6 +55,21 @@ runs) and never waits for a running generation, so it answers while a reply is b
 | `queue` | Requests waiting behind the running one, and how many may wait |
 
 A stub server (`--stub`) reports `null` for everything the model file or a measurement would supply.
+
+## The UI's routes (`/api/`)
+
+For the page ([UI.md](UI.md)); a script may use them too. `POST /api/session` (with `Authorization: Bearer <key>` when
+Windlass has an API key) returns `{"schema": "windlass.ui.session/1", "token": ..., "apiKeyRequired": bool}`. The others need
+that token in an `X-Windlass-Session` header (never the query string), and answer 401 without it, and 403 to any `Origin`
+but this server's own.
+
+| Route | Answer |
+| --- | --- |
+| `GET /api/status` | `windlass.ui.status/1`: `state` (`loading`, `ready`, `error`), `loadError`, `model`, `busy`, `queued`, `queueMax`, `address`, `apiKeyRequired`, `batch`, `stub`, `startedAt`, `uptimeSeconds`, `autoStop` (`enabled`, `ownsLife`, `armed`) and `windlass`, the same object `/v1/models` carries |
+| `GET /api/playbook` | `windlass.ui.playbook/1`: `playbook` is the `windlass.playbook/1` document in use, or `null` (stub, or `--no-playbook`) |
+| `GET /api/logs?after=N` | `windlass.ui.logs/1`: `lines` (`seq`, `text`) written after sequence number N, `last`; the last 500 lines are kept in memory |
+| `POST /api/heartbeat` | The Presence rule for the page. Token in the header, or in the body's `token` on this route (a page-close beacon cannot set headers). Body `{"tab": ..., "leaving": bool}`. Answers `{"ok": true, "ownsLife": ..., "autoStop": ...}`. Only a server started with `serve --open` counts it; otherwise it is acknowledged and ignored |
+| `POST /api/shutdown` | Stops Windlass, like `POST /__fleethacker/shutdown`, for the page's End session |
 
 ## Errors
 

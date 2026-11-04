@@ -121,6 +121,12 @@ namespace Windlass
             return f;
         }
 
+        public override string PlaybookJson()
+        {
+            Playbook p = _o.Playbook;
+            return p != null && _o.Machine != null ? p.ToJson(_o.Machine) : null;
+        }
+
         public List<int> EncodePrompt(IList<ChatMessage> messages)
         {
             return Tokenizer.Encode(Template.Render(messages), true, true);

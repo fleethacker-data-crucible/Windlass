@@ -1,7 +1,7 @@
 # CLI and API parity
 
-Windlass against the Fleet CLI parity proposal (comms `proposals/cli-parity`, v0.1, status: proposed). Windlass has no
-GUI, so every action is already a command or an API route; this page is the inventory the proposal's rollout asks for,
+Windlass against the Fleet CLI parity proposal (comms `proposals/cli-parity`, v0.1, status: proposed). Windlass has a
+browser UI ([UI.md](UI.md)) and every action in it is also a command or an API route; this page is the inventory the proposal's rollout asks for,
 with the gaps stated. `Launch-Windlass.bat commands --json` (`windlass.commands/1`) is the registry; a test
 (`tests\ParityTests.cs`) fails if a command or a route is missing from this page.
 
@@ -20,13 +20,19 @@ with the gaps stated. `Launch-Windlass.bat commands --json` (`windlass.commands/
 | List commands | `commands [--json]` | none | `windlass.commands/1` |
 | Health and load state | none | `GET /health` | JSON: state, model, busy, queued |
 | Identify the tool, find its pid | none | `GET /__fleethacker/id` | JSON: tool, version, pid |
-| Stop | `src\Stop-Windlass.ps1` | `POST /__fleethacker/shutdown` (header `X-FleetHacker-Shutdown: 1`) | `{"stopping": true}` |
+| Stop | `src\Stop-Windlass.ps1` | `POST /__fleethacker/shutdown` (header `X-FleetHacker-Shutdown: 1`), `POST /api/shutdown` (UI session token) | `{"stopping": true}` |
+| Say that an owner is still there | none | `POST /__fleethacker/heartbeat` (header `X-FleetHacker-Heartbeat: 1`), `POST /api/heartbeat` (the UI's tab, `serve --open` only) | `{"ok": true, ...}` |
+| Open the browser UI | `serve --open` (`--no-ui` turns the UI off) | `GET /` | the page |
+| Get a UI session | none | `POST /api/session` (the API key when one is set) | `windlass.ui.session/1` |
+| Show the live state | none | `GET /api/status` | `windlass.ui.status/1` (the `windlass` object of `GET /v1/models` plus state, queue, address) |
+| Show the playbook in use | `playbook show` | `GET /api/playbook` | `windlass.ui.playbook/1` around `windlass.playbook/1` |
+| Read the log | the file in `logs\` | `GET /api/logs?after=N` | `windlass.ui.logs/1` |
 
 ## Against the proposal's requirements
 
 | # | Requirement | Windlass today |
 | --- | --- | --- |
-| 1 | No GUI-only code paths | **Met**: there is no GUI |
+| 1 | No GUI-only code paths | **Met**: every page of the UI reads or calls a route above, and the commands that measure (`probe`, `eval`, `fidelity`) are not in the UI at all, only shown there |
 | 2 | Named commands `<app> <noun> <verb>` | **Partly**: `playbook probe\|show\|eval` follow it; `serve`, `run`, `info` and `commands` are single words, and there is no `windlass <noun> <verb>` spelling for the API routes |
 | 3 | `--json` with a versioned schema; `--out`, UTF-8 without BOM | **Partly**: `playbook *` and `commands` have `--json` and `--out`; `info` and `run` print text only (gap) |
 | 4 | Open, documented project files | **Met** for the playbook (`playbooks\*.json`, schema `windlass.playbook/1`); Windlass has no other project files |
@@ -34,7 +40,7 @@ with the gaps stated. `Launch-Windlass.bat commands --json` (`windlass.commands/
 | 6 | Stable IDs across the Fleet | Not applicable (Windlass makes no shared assets) |
 | 7 | `<app> commands --json` lists every command with inputs and outputs | **Met** for the CLI; the API routes are listed here, not in a generated OpenAPI file or MCP tools (gap) |
 | 8 | A parity test in CI | **Partly**: `tests\ParityTests.cs` checks this page against `commands --json` and the routes in `src\Server.cs`; there are no GUI actions to register |
-| 9 | Locked to this user: session token file, Host/Origin checks, no CORS, confirm on destructive calls | **Partly**: Host and Origin are checked on every request, a request with a non-loopback `Origin` gets 403, but a loopback page on any port is answered with CORS headers (the proposal says send none: a deviation, kept so local web UIs can call it), and an optional `--api-key` / `WINDLASS_API_KEY` bearer key exists. There is **no per-session token file** (gap), and the only destructive route, shutdown, needs a custom header, not `confirm: true`. Researcher sign-off has not happened |
+| 9 | Locked to this user: session token file, Host/Origin checks, no CORS, confirm on destructive calls | **Partly**: Host and Origin are checked on every request, a request with a non-loopback `Origin` gets 403, but a loopback page on any port is answered with CORS headers (the proposal says send none: a deviation, kept so local web UIs can call it), and an optional `--api-key` / `WINDLASS_API_KEY` bearer key exists. The UI's `/api/` routes need a per-session token (`POST /api/session`, which needs the API key when one is set) and answer this server's own origin only, but there is still **no per-session token file** for other programs (gap), and the only destructive route, shutdown, needs a custom header, not `confirm: true`. Researcher sign-off has not happened |
 
 ## Gaps to close (not done here)
 

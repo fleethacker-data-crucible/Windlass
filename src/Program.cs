@@ -48,6 +48,10 @@ Options:
   --int-dot               integer dot products with 8-bit activations, llama.cpp's CPU method (default off; logits move slightly)
   --no-playbook           ignore the playbook; use the defaults and the options given
   --no-auto-stop          do not stop when the programs that sent heartbeats are gone (or set WINDLASS_AUTO_STOP=0)
+  --open                  serve: open the browser UI, and stop when its tab closes (the tab owns the server; add
+                          --no-auto-stop to keep serving after it closes). Without --open the UI is still at the
+                          server's address, but closing it never stops the server
+  --no-ui                 serve: the API only, no browser UI
   --guess / --no-guess    guess-ahead for greedy replies on or off (default: the playbook's choice, else off)
   --batch <n>             serve: let up to n requests generate together, one pass over the layers per step for all
                           of them (default 1 = one at a time). Each adds a KV cache; guess-ahead is off
@@ -108,7 +112,7 @@ Options:
             }
         }
 
-        static readonly string[] Flags = { "int-dot", "no-auto-stop", "no-prefetch", "no-playbook", "stub", "verbose", "json", "guess", "no-guess" };
+        static readonly string[] Flags = { "int-dot", "no-auto-stop", "no-prefetch", "no-playbook", "stub", "verbose", "json", "guess", "no-guess", "open", "no-ui" };
 
         public static Dictionary<string, string> ParseArgs(string[] args, int from)
         {
@@ -396,7 +400,7 @@ Options:
         // commands: the CLI describes itself, so an agent can find every command and its inputs and outputs.
         static readonly string[][] CommandList =
         {
-            new[] { "serve", "--model [--model-id --port --api-key --context-length --cache-gb --no-prefetch --threads --int-dot --guess --no-guess --batch --no-playbook --chat-template --max-tokens --max-queue --keepalive --no-auto-stop --stub --verbose]", "an OpenAI-compatible server on 127.0.0.1 (see docs/API.md)" },
+            new[] { "serve", "--model [--model-id --port --api-key --context-length --cache-gb --no-prefetch --threads --int-dot --guess --no-guess --batch --no-playbook --chat-template --max-tokens --max-queue --keepalive --no-auto-stop --open --no-ui --stub --verbose]", "an OpenAI-compatible server and browser UI on 127.0.0.1 (see docs/API.md)" },
             new[] { "run", "--model --prompt [--system --max-tokens --temperature and the serve options above]", "one reply in the console" },
             new[] { "info", "--model", "the model's shape, sizes and RAM needs (text)" },
             new[] { "playbook probe", "--model [--model-id --json --out]", "windlass.playbook/1: machine, measurements, settings, rules; saved in playbooks\\" },
@@ -501,6 +505,11 @@ Options:
             s.Version = version;
             s.ScriptPath = scriptPath;
             s.AutoStop = !o.ContainsKey("no-auto-stop") && Environment.GetEnvironmentVariable("WINDLASS_AUTO_STOP") != "0";
+            string uiRoot = Path.Combine(root, "ui", "dist");
+            if (!o.ContainsKey("no-ui") && Directory.Exists(uiRoot)) s.UiRoot = uiRoot;
+            s.UiOwnsLife = o.ContainsKey("open") && s.UiRoot != null;
+            s.Batch = o.ContainsKey("batch") ? Int(o, "batch", 1, 1, BatchPlan.MaxBatch) : 1;
+            s.Stub = o.ContainsKey("stub");
 
             Backend backend;
             if (o.ContainsKey("stub"))
@@ -524,6 +533,8 @@ Options:
                 rt["started"] = DateTime.UtcNow.ToString("o");
                 try { File.WriteAllText(runtimeFile, Json.Write(rt)); } catch (IOException) { }
                 Log.Info("Windlass " + version + " on http://127.0.0.1:" + s.Port + "/v1 (Ctrl+C or Stop-Windlass.ps1 to stop)");
+                if (s.UiRoot != null)
+                    Log.Info("Browser UI at http://127.0.0.1:" + s.Port + "/" + (s.UiOwnsLife ? (s.AutoStop ? " (stops when its tab closes)" : " (keeps serving after its tab closes)") : " (closing it does not stop the server)"));
                 if (string.IsNullOrEmpty(s.ApiKey)) Log.Info("No API key set: any program on this PC can use the model.");
                 Console.CancelKeyPress += delegate(object sender, ConsoleCancelEventArgs e) { e.Cancel = true; Log.Info("stopping"); server.Stop(); };
                 server.Stopped.WaitOne();

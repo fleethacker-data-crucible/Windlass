@@ -1,0 +1,91 @@
+@import 'tailwindcss' source('./');
+@import '../vendor/fleet/fleet.css';
+
+/* Windlass on the shared Fleet tokens (vendor/fleet/fleet.css, docs/UNIFIED-UI.md). Components use the semantic names
+   below; they map onto --fl-* only, so no component carries a raw colour and both themes work. */
+@custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
+
+/* Signature accent: chain-iron steel (the drum's chain). Proposed for UNIFIED-UI.md section 3.3; both values pass 4.5:1
+   against every surface of their theme (night 8.4 to 10.4, chart 5.9 to 7.1). Set here, not in the vendored file. */
+:root { --fl-accent-night: #b7c9d6; --fl-accent-chart: #3b5b75; }
+[data-app='windlass'] { --fl-accent-night: #b7c9d6; --fl-accent-chart: #3b5b75; }
+
+@theme {
+  --font-sans: var(--fl-font-body);
+  --font-mono: var(--fl-font-mono);
+  --font-display: var(--fl-font-display);
+
+  --color-background: var(--fl-background);
+  --color-foreground: var(--fl-foreground);
+  --color-surface: var(--fl-surface);
+  --color-card: var(--fl-card);
+  --color-popover: var(--fl-popover);
+  --color-muted: var(--fl-muted);
+  --color-muted-foreground: var(--fl-muted-foreground);
+  --color-border: var(--fl-border);
+  --color-border-strong: var(--fl-border-strong);
+  --color-control: var(--fl-control-border);
+  --color-ring: var(--fl-brass);
+  --color-brass: var(--fl-brass);
+  --color-primary: var(--fl-accent);
+  --color-primary-foreground: var(--fl-accent-ink);
+  --color-sidebar: var(--fl-sidebar);
+  --color-success: var(--fl-success);
+  --color-warning: var(--fl-warning);
+  --color-danger: var(--fl-danger);
+  --color-info: var(--fl-info);
+
+  --radius-md: 6px;
+  --radius-lg: 10px;
+  --radius-xl: 14px;
+}
+
+@layer base {
+  * { border-color: var(--color-border); }
+  html, body, #app { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    font-size: var(--fl-text-body);
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  h1, h2, h3 { line-height: 1.25; margin: 0; }
+  button, [role='button'] { cursor: pointer; }
+  button:disabled { cursor: not-allowed; }
+  input::placeholder, textarea::placeholder { color: var(--color-muted-foreground); opacity: 0.8; }
+  * { scrollbar-width: thin; scrollbar-color: var(--fl-border-strong) transparent; }
+  code, kbd, .font-mono { font-variant-ligatures: none; }
+  dialog::backdrop { background: color-mix(in srgb, var(--fl-background) 72%, transparent); }
+}
+
+@layer components {
+  /* Fleet components (UNIFIED-UI.md section 6): the same class names fleet.css styles, with the states the app needs. */
+  .fl-btn { min-width: 32px; }
+  .fl-btn:focus-visible, .fl-input:focus-visible { outline: 2px solid var(--fl-brass); outline-offset: 2px; }
+  .fl-btn--primary:hover:not(:disabled) { background: color-mix(in srgb, var(--fl-accent) 86%, var(--fl-foreground)); }
+  .fl-btn--danger:hover:not(:disabled) { filter: brightness(1.08); }
+  .fl-btn--icon { padding: 0; width: 32px; justify-content: center; }
+  .fl-btn svg { width: 16px; height: 16px; stroke-width: 1.75; flex: none; }
+  .fl-nav-item { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 36px; padding: 0 12px; border: 0; border-left: 3px solid transparent; background: transparent; color: var(--fl-muted-foreground); font: 500 var(--fl-text-secondary) var(--fl-font-body); text-align: left; }
+  .fl-nav-item:hover { background: var(--fl-muted); color: var(--fl-foreground); }
+  .fl-nav-item[aria-current='page'] { color: var(--fl-accent); border-left-color: var(--fl-accent); background: color-mix(in srgb, var(--fl-accent) 12%, var(--fl-sidebar)); }
+  .fl-nav-item svg { width: 20px; height: 20px; stroke-width: 1.75; flex: none; }
+  .fl-badge--success { color: var(--fl-success); }
+  .fl-badge--warning { color: var(--fl-warning); }
+  .fl-badge--danger { color: var(--fl-danger); }
+  .fl-badge--info { color: var(--fl-info); }
+  .fl-badge--muted { color: var(--fl-muted-foreground); }
+  .fl-badge svg { width: 12px; height: 12px; stroke-width: 2; }
+  .fl-eyebrow { font-size: var(--fl-text-caption); font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--fl-muted-foreground); }
+  .fl-dialog { padding: 0; color: var(--fl-foreground); max-width: min(520px, calc(100vw - 32px)); width: 100%; }
+  .fl-toast { background: var(--fl-popover); border: 1px solid var(--fl-border-strong); border-radius: var(--fl-radius-control); box-shadow: var(--fl-shadow); padding: 10px 12px; font-size: var(--fl-text-secondary); display: flex; gap: 8px; align-items: flex-start; }
+  .fl-table td.num, .fl-table th.num { text-align: right; }
+  .fl-skeleton { background: linear-gradient(90deg, var(--fl-muted) 0%, var(--fl-border) 40%, var(--fl-muted) 80%); background-size: 200% 100%; animation: wl-shimmer 1.4s linear infinite; border-radius: var(--fl-radius-control); }
+}
+
+@keyframes wl-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+@keyframes wl-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+.wl-pulse { animation: wl-pulse 1.6s ease-in-out infinite; }

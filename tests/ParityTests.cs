@@ -29,7 +29,7 @@ namespace Windlass.Tests
             }
 
             string server = File.ReadAllText(Path.Combine(root, "src", "Server.cs"));
-            foreach (string route in new string[] { "/v1/chat/completions", "/v1/models", "/health", "/__fleethacker/id", "/__fleethacker/shutdown" })
+            foreach (string route in new string[] { "/v1/chat/completions", "/v1/models", "/health", "/__fleethacker/id", "/__fleethacker/shutdown", "/__fleethacker/heartbeat", "/api/session", "/api/status", "/api/playbook", "/api/logs", "/api/heartbeat", "/api/shutdown" })
             {
                 Check(server.Contains("\"" + route), "src/Server.cs no longer routes " + route + "; update this test and the page");
                 Check(doc.Contains(route), "docs/CLI-API-PARITY.md does not name the route " + route);

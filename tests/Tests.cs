@@ -92,6 +92,14 @@ namespace Windlass.Tests
                 Add(tests, "fidelity: playbook fidelity records a score on a tiny model and playbook show prints it", FidelityCli);
                 Add(tests, "api: /v1/models carries the windlass extension (null when unmeasured, numbers once measured)", ApiModelFacts);
                 Add(tests, "api: /v1/models from a real tiny model after probe, eval, fidelity and runs, without the engine lock", ApiModelFactsReal);
+                Add(tests, "ui: serves its files with the CSP, by exact match only (no traversal, no other types)", UiServesItsFiles);
+                Add(tests, "ui: optional; without ui\\dist or index.html the API runs alone", UiIsOptional);
+                Add(tests, "ui: file list, content types and session tokens", UiAssetsList);
+                Add(tests, "ui: /api/session, /api/status and /api/playbook need the token and the page's own origin", UiSessionAndStatus);
+                Add(tests, "ui: the session token needs the API key when one is set, and opens /api/ only", UiSessionNeedsTheApiKey);
+                Add(tests, "ui: /api/logs returns new lines after a cursor, bounded", UiLogs);
+                Add(tests, "ui: heartbeats own the server only when started with --open (fake clock, beacon token in body)", UiHeartbeatOnlyOwnsAnOpenedServer);
+                Add(tests, "ui: /api/shutdown needs the token", UiShutdown);
                 MoeTests.Register(tests);
                 ArchTests.Register(tests);
                 Add(tests, "batch: ForwardBatch gives the logits of separate runs, at different lengths", BatchForwardMatchesSingle);
