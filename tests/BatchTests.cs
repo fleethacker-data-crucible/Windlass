@@ -197,7 +197,7 @@ namespace Windlass.Tests
                 string turn2Meta = Describe(res);
                 one.Dispose();
 
-                EngineOptions o = new EngineOptions { ModelPath = Model(s), Batch = 3 };
+                EngineOptions o = new EngineOptions { ModelPath = Model(s), Batch = 3, Machine = Roomy() };
                 LayeredBackend b = new LayeredBackend(o);
                 b.Load();
                 Equal(3, b.MaxConcurrent, "batch 3 allows 3 at once");
@@ -313,7 +313,7 @@ namespace Windlass.Tests
             Check(want[0].Length > 0 && want[1].Length > 0 && want[2].Length > 0, "baseline replies exist");
             Check(want[0] != want[1] && want[1] != want[2], "the three prompts give different replies");
 
-            LayeredBackend backend = new LayeredBackend(new EngineOptions { ModelPath = Model(spec), ModelId = "tiny", Batch = 3 });
+            LayeredBackend backend = new LayeredBackend(new EngineOptions { ModelPath = Model(spec), ModelId = "tiny", Batch = 3, Machine = Roomy() });
             using (new TestServer(backend, new ServerSettings { KeepaliveMs = 100 }))
             {
                 // Two at once.
@@ -366,7 +366,7 @@ namespace Windlass.Tests
             long sequential = one.Model.Stream.BytesRead - b0;
             one.Dispose();
 
-            LayeredBackend b = new LayeredBackend(new EngineOptions { ModelPath = Model(spec), Prefetch = false, Batch = 3 });
+            LayeredBackend b = new LayeredBackend(new EngineOptions { ModelPath = Model(spec), Prefetch = false, Batch = 3, Machine = Roomy() });
             b.Load();
             long c0 = b.Model.Stream.BytesRead;
             List<Func<string>> work = new List<Func<string>>();
@@ -381,6 +381,15 @@ namespace Windlass.Tests
             b.Dispose();
             Check(maxRows == 3, "all three shared steps (most in one step: " + maxRows + ")");
             Check(batched < 0.6 * sequential, "batched read " + batched + " bytes, one after another " + sequential + " (ratio " + (batched / (double)sequential).ToString("F2") + ", " + steps + " batch steps)");
+        }
+
+        // Fixed machine facts with room for any test model, so the batch tests do not depend on the free RAM of the
+        // computer that runs them (a CI runner may have under 1 GB free). The RAM check itself is tested in BatchLimits.
+        static MachineFacts Roomy()
+        {
+            MachineFacts m = MachineFacts.FromJson(null);
+            m.TotalRam = m.AvailableRam = 64000000000L;
+            return m;
         }
 
         // --batch is refused when the KV caches cannot fit, validated on the command line, and the server grants N turns.
@@ -412,14 +421,21 @@ namespace Windlass.Tests
             Equal(4, ok.MaxConcurrent, "batch 4 allows 4 at once");
             ok.Dispose();
 
-            Equal(1, Program.Engine(Program.ParseArgs(new string[] { "--model", path }, 0), null).Batch, "the default is one at a time");
-            Equal(3, Program.Engine(Program.ParseArgs(new string[] { "--model", path, "--batch", "3" }, 0), null).Batch, "--batch 3");
+            try
+            {
+                Program.Engine(Program.ParseArgs(new string[] { "--model", path, "--batch", "4" }, 0), null, tiny);
+                throw new TestFailure("--batch 4 should be refused on a computer with no room");
+            }
+            catch (ArgumentException e) { Check(e.Message.Contains("does not fit"), "the command line refuses --batch 4 when the caches cannot fit: " + e.Message); }
+
+            Equal(1, Program.Engine(Program.ParseArgs(new string[] { "--model", path }, 0), null, Roomy()).Batch, "the default is one at a time");
+            Equal(3, Program.Engine(Program.ParseArgs(new string[] { "--model", path, "--batch", "3" }, 0), null, Roomy()).Batch, "--batch 3");
             foreach (string bad in new string[] { "0", "65", "x" })
             {
-                try { Program.Engine(Program.ParseArgs(new string[] { "--model", path, "--batch", bad }, 0), null); throw new TestFailure("--batch " + bad + " should be refused"); }
+                try { Program.Engine(Program.ParseArgs(new string[] { "--model", path, "--batch", bad }, 0), null, Roomy()); throw new TestFailure("--batch " + bad + " should be refused"); }
                 catch (ArgumentException e) { Check(e.Message.Contains("--batch"), "usage error names the option: " + e.Message); }
             }
-            Check(!Program.Engine(Program.ParseArgs(new string[] { "--model", path, "--batch", "2", "--guess" }, 0), null).Speculate, "guess-ahead is off with --batch");
+            Check(!Program.Engine(Program.ParseArgs(new string[] { "--model", path, "--batch", "2", "--guess" }, 0), null, Roomy()).Speculate, "guess-ahead is off with --batch");
 
             Scheduler sch = new Scheduler(1, 2);
             int pos;

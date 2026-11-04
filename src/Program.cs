@@ -165,9 +165,14 @@ Options:
 
         // Settings for the engine: this computer's playbook first (root = the Windlass folder, null = no playbook),
         // then every option the user gave, which wins.
-        public static EngineOptions Engine(Dictionary<string, string> o, string root)
+        public static EngineOptions Engine(Dictionary<string, string> o, string root) { return Engine(o, root, null); }
+
+        // machine: the computer's facts to plan against, or null to read this one (tests pass fixed facts so the result
+        // does not depend on how much RAM is free on the machine running them). A playbook (root != null) reads its own.
+        public static EngineOptions Engine(Dictionary<string, string> o, string root, MachineFacts machine)
         {
             EngineOptions e = new EngineOptions();
+            e.Machine = machine;
             e.ModelPath = Path.GetFullPath(Need(o, "model"));
             if (!File.Exists(e.ModelPath)) throw new FileNotFoundException("No model file at " + e.ModelPath, e.ModelPath);
             string v;
