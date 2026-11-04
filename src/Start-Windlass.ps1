@@ -2,6 +2,8 @@
 # Started by Launch-Windlass.bat:
 #   powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File src\Start-Windlass.ps1 serve --model <file.gguf> [options]
 #   ... -File src\Start-Windlass.ps1 check      locality checks and compile only, then exit
+#   ... -File src\Start-Windlass.ps1            (no arguments, e.g. a double-click) is serve --open: the UI opens and loads the model you pick
+# serve --open also opens the browser UI once the server answers; this script does that, the engine never starts a process.
 # Runs the locality checks, picks a port in Windlass's block (8777-8779, policy exclusive, edge-ops PORTS.md),
 # compiles src\*.cs in memory with Add-Type (C# 5, .NET Framework 4.8, no references beyond the BCL) and calls
 # [Windlass.Program]::Run. No param() block on purpose: arguments such as --model reach $args unchanged.
@@ -25,6 +27,34 @@ New-Item -ItemType Directory -Force $env:TEMP | Out-Null
 $version = ([string](Get-Content -LiteralPath (Join-Path $root 'VERSION') -TotalCount 1 -ErrorAction SilentlyContinue)).Trim()
 if (-not $version) { $version = '0.0.0' }
 $cliArgs = @($args | ForEach-Object { [string]$_ })
+
+# Opens the browser at $Url once the server there answers /__fleethacker/id. Runs in this process on its own thread, so it
+# works while the engine blocks the main one; gives up after two minutes.
+function Start-BrowserWhenReady([string]$Url) {
+    $rs = [runspacefactory]::CreateRunspace()
+    $rs.Open()
+    $ps = [powershell]::Create()
+    $ps.Runspace = $rs
+    [void]$ps.AddScript({
+        param($Url)
+        for ($i = 0; $i -lt 600; $i++) {
+            Start-Sleep -Milliseconds 200
+            try {
+                $r = [System.Net.HttpWebRequest]::Create($Url + '__fleethacker/id')
+                $r.Proxy = $null
+                $r.Timeout = 1000
+                $resp = $r.GetResponse()
+                $resp.Close()
+                Start-Process $Url
+                return
+            } catch { Write-Verbose 'Not up yet.' }
+        }
+    }).AddArgument($Url)
+    [void]$ps.BeginInvoke()
+}
+
+# A double-click passes no arguments: serve with the browser UI, which asks which model to load.
+if ($cliArgs.Count -eq 0 -and [Environment]::UserInteractive) { $cliArgs = @('serve', '--open') }
 $command = if ($cliArgs.Count -gt 0) { $cliArgs[0] } else { '' }
 
 # Locality checks: Windlass makes no outgoing connections and starts no processes. Only Server.cs may use
@@ -66,9 +96,23 @@ if ($command -eq 'serve' -and -not ($cliArgs | Where-Object { $_ -eq '--port' -o
     }
     if ($fleet.Action -eq 'Reuse') {
         Write-Host "Windlass $($fleet.Existing.Version) is already running on http://127.0.0.1:$($fleet.Port)/v1 (pid $($fleet.Existing.Pid)). Stop it with src\Stop-Windlass.ps1 first."
+        if ($cliArgs -contains '--open') {
+            Write-Host 'Opening its browser UI.'
+            Start-Process "http://127.0.0.1:$($fleet.Port)/"
+        }
         exit 0
     }
     $cliArgs += @('--port', [string]$fleet.Port)
+}
+
+# serve --open: the browser UI opens when the server answers. The port is --port, or the one picked above.
+if ($command -eq 'serve' -and ($cliArgs -contains '--open')) {
+    $uiPort = 8777
+    for ($i = 0; $i -lt $cliArgs.Count; $i++) {
+        if ($cliArgs[$i] -eq '--port' -and ($i + 1) -lt $cliArgs.Count) { $uiPort = [int]$cliArgs[$i + 1] }
+        elseif ($cliArgs[$i] -like '--port=*') { $uiPort = [int]($cliArgs[$i] -replace '^--port=', '') }
+    }
+    Start-BrowserWhenReady -Url "http://127.0.0.1:$uiPort/"
 }
 
 # Machine facts for the playbook (Playbook.cs): CPU, cores, RAM, battery, graphics. Read-only CIM queries; free RAM

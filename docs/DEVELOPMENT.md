@@ -28,6 +28,13 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests\Run-Tests.ps1
   headers, keepalives while queued, the full-queue 503, cancel on disconnect, Host and Origin checks, and one
   end-to-end request through a real tiny model.
 
+## The UI
+
+`ui-src\` is the source (Svelte 5, Tailwind 4); its compiled output `ui\dist\` is committed and served by `src\Ui.cs`. Build,
+check and test it off the workstation ([UI.md](UI.md#building-it)). `tests\UiTests.cs` covers the server side with no
+browser: the files and headers, exact-match serving, the session token and API key, the origin rule, the logs cursor and the
+rule that only `serve --open` belongs to its tab. Change the page, run `npm run build` and commit `ui\dist` with it.
+
 ## Checks and lint
 
 `Launch-Windlass.bat check` runs the locality checks and compiles the C# without starting anything. Lint with
@@ -37,6 +44,6 @@ ASCII.
 ## Brand assets
 
 `powershell -File build\New-WindlassBrand.ps1` (needs Edge or Chrome) renders `assets\brand\mark.svg` to
-`mark-256.png` and `favicon.ico`, and the placeholder emblem `assets\brand\emblem-source.html` to `emblem-light.png`
-and `emblem-dark.png`. The README screenshots are rendered from `docs\screenshots\console-source.html` (instructions
+`mark-256.png` and `favicon.ico` (the emblems are final artwork now; a placeholder is rendered only if `assets\brand\emblem-source.html`
+exists). The README screenshots are rendered from `docs\screenshots\console-source.html` (instructions
 in that file).

@@ -1,6 +1,6 @@
 # Third-party notices
 
-Windlass ships no third-party code at run time: no packages, no DLLs. The sources below are ported or adapted into its own C#.
+Windlass ships no third-party code at run time: no packages, no DLLs. The sources below are ported or adapted into its own C#; the browser UI's bundled packages are listed at the end of the C# sources.
 
 ## llama.cpp / ggml
 
@@ -19,6 +19,10 @@ Taken from it: `src/Half.cs` and `src/Json.cs` (unchanged apart from the namespa
 ## FleetHacker edge-ops
 
 - `src/FleetPort.psm1` is a copy of [tools/fleet-port/FleetPort.psm1](https://github.com/fleethacker-data-crucible/edge-ops/tree/main/tools/fleet-port) (MIT), the suite's port-block and self-detection helper. `PSScriptAnalyzerSettings.psd1` and `.gitattributes` come from edge-ops too.
+
+## Browser UI (compiled into `ui\dist`)
+
+The UI is built off the workstation from `ui-src`; the compiled files contain these MIT or ISC packages, bundled (nothing is loaded at run time): [Svelte](https://github.com/sveltejs/svelte) (MIT), [Tailwind CSS](https://github.com/tailwindlabs/tailwindcss) (MIT), [Lucide](https://github.com/lucide-icons/lucide) icons via `@lucide/svelte` (ISC), [clsx](https://github.com/lukeed/clsx) (MIT) and [tailwind-merge](https://github.com/dcastil/tailwind-merge) (MIT). Vite, Vitest, TypeScript and svelte-check are build and test tools and are not shipped. `ui-src/vendor/fleet/fleet.css` and `docs/UNIFIED-UI.md` are the Fleet's shared files, identical in every Fleet repo.
 
 ## AirLLM
 

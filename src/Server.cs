@@ -2,6 +2,8 @@
 // Endpoints: POST /v1/chat/completions (stream or not), GET /v1/models, GET /v1/models/{id}, GET /health, and the
 // FleetHacker GET /__fleethacker/id + POST /__fleethacker/shutdown (edge-ops PORTS.md), and POST /__fleethacker/heartbeat
 // (the Fleet local app lifecycle standard: stop when whoever sent heartbeats is gone; Presence.cs).
+// Also the browser UI (docs/UI.md): GET / and the files of ui\dist (Ui.cs), and its /api/ routes (session, status, playbook,
+// logs, heartbeat, shutdown), which need a session token and this server's own origin.
 // One generation runs at a time (or, with --batch N, up to N together); others wait in a bounded FIFO queue (beyond it:
 // 503). A streaming request gets its
 // headers and an SSE comment as soon as it is accepted, then ": keepalive" comments while it waits or while a slow
@@ -30,6 +32,12 @@ namespace Windlass
         public bool AutoStop = true;           // stop when the programs that sent heartbeats are gone (see Presence.cs); off: WINDLASS_AUTO_STOP=0 or --no-auto-stop
         public int PresenceTickMs = 1000;      // how often the stop rule is checked; 0 = not at all (tests call PresenceTick)
         public Func<DateTime> Clock;           // UTC now; tests pass a fake
+        public string UiRoot;                  // the ui\dist folder; null = no browser UI (the API alone, as before)
+        public bool UiOwnsLife;                // serve --open: the browser tab's heartbeats own the server's life (Presence.cs)
+        public string SessionToken;            // the UI session token; made when null (tests pass a known one)
+        public int Batch = 1;                  // shown in the UI
+        public bool Stub;                      // shown in the UI
+        public string RecentFile;              // playbooks\recent-models.txt: models loaded from the UI, newest first (null = not remembered)
     }
 
     // The running jobs (one, or the batch size) and a bounded FIFO of waiting ones.
@@ -109,11 +117,19 @@ namespace Windlass
         readonly HttpListener _listener = new HttpListener();
         readonly ManualResetEvent _stopped = new ManualResetEvent(false);
         Thread _accept;
+        readonly UiAssets _ui;
+        readonly string _token;
+        readonly DateTime _started = DateTime.UtcNow;
 
         public ApiServer(Backend backend, ServerSettings settings)
         {
             _backend = backend;
             _s = settings;
+            _ui = settings.UiRoot != null ? new UiAssets(settings.UiRoot) : null;
+            if (_ui != null && !_ui.Available) { Log.Warn("no browser UI at " + settings.UiRoot + " (index.html is missing); serving the API only"); _ui = null; }
+            _token = settings.SessionToken ?? UiToken.New();
+            SwitchableBackend sw = backend as SwitchableBackend;
+            if (sw != null && settings.RecentFile != null) sw.Loaded = delegate(string path) { ModelBrowser.Remember(settings.RecentFile, path); };
             _presence = new Presence(settings.AutoStop);
             _sched = new Scheduler(settings.MaxQueue, backend.MaxConcurrent);
         }
@@ -228,7 +244,8 @@ namespace Windlass
                 }
                 if (origin != null)
                 {
-                    bool fleet = path.StartsWith("/__fleethacker/", StringComparison.Ordinal);
+                    // The Fleet routes and the UI's own /api/ routes answer this server's own pages only, not other loopback ports.
+                    bool fleet = path.StartsWith("/__fleethacker/", StringComparison.Ordinal) || path.StartsWith("/api/", StringComparison.Ordinal);
                     bool ok = fleet ? IsLoopbackHost(OriginHostPort(origin), _s.Port) : IsLoopbackOrigin(origin);
                     if (!ok) { Error(res, 403, "cross-origin requests are allowed from loopback pages only", "forbidden"); return; }
                     res.AddHeader("Access-Control-Allow-Origin", origin);
@@ -325,12 +342,12 @@ namespace Windlass
                 {
                     Dictionary<string, object> list = new Dictionary<string, object>();
                     list["object"] = "list";
-                    list["data"] = new List<object> { ModelCard() };
+                    list["data"] = _backend.State == BackendState.Idle ? new List<object>() : new List<object> { ModelCard() };
                     Send(res, 200, list);
                     return;
                 }
                 string id = Uri.UnescapeDataString(path.Substring("/v1/models/".Length));
-                if (id != _backend.ModelId) { Error(res, 404, "model '" + id + "' not found", "not_found_error"); return; }
+                if (_backend.State == BackendState.Idle || id != _backend.ModelId) { Error(res, 404, "model '" + id + "' not found", "not_found_error"); return; }
                 Send(res, 200, ModelCard());
                 return;
             }
@@ -341,7 +358,188 @@ namespace Windlass
                 ChatCompletions(ctx);
                 return;
             }
+            if (path.StartsWith("/api/", StringComparison.Ordinal)) { UiApi(ctx, path); return; }
+            if (_ui != null && (method == "GET" || method == "HEAD"))
+            {
+                byte[] data; string type;
+                if (_ui.TryGet(path, out data, out type)) { SendFile(res, method == "HEAD", data, type, path == "/" || path == "/index.html"); return; }
+            }
             Error(res, 404, "no route for " + method + " " + path, "not_found_error");
+        }
+
+        // ---- the browser UI: files and /api/ ----
+
+        static void SendFile(HttpListenerResponse res, bool headOnly, byte[] data, string type, bool page)
+        {
+            res.StatusCode = 200;
+            res.ContentType = type;
+            res.AddHeader("Cache-Control", page ? "no-store" : "no-cache");
+            res.AddHeader("Content-Security-Policy", UiAssets.Csp);
+            res.AddHeader("X-Content-Type-Options", "nosniff");
+            res.AddHeader("Referrer-Policy", "no-referrer");
+            res.AddHeader("Cross-Origin-Resource-Policy", "same-origin");
+            res.ContentLength64 = data.Length;
+            if (!headOnly) res.OutputStream.Write(data, 0, data.Length);
+            res.Close();
+        }
+
+        static Dictionary<string, object> ReadBody(HttpListenerRequest req)
+        {
+            if (!req.HasEntityBody) return null;
+            string text;
+            using (StreamReader r = new StreamReader(req.InputStream, new UTF8Encoding(false))) text = r.ReadToEnd();
+            try { return Json.Parse(text) as Dictionary<string, object>; }
+            catch (FormatException) { return null; }
+        }
+
+        bool TokenOk(string given)
+        {
+            return !string.IsNullOrEmpty(given) && FixedTimeEquals(given, _token);
+        }
+
+        // POST /api/session   (the API key, when one is set) -> the session token the other /api/ routes need
+        // POST /api/heartbeat (token in the header, or in the body for the page-close beacon) -> the Presence rule
+        // GET  /api/status, /api/playbook, /api/logs, /api/models, POST /api/model, /api/model/unload, /api/shutdown   (token in the
+// X-Windlass-Session header). /api/model loads or swaps the model; it is refused (409) while a reply is running or queued.
+        // Every action here also exists as a CLI command or a documented route (docs/CLI-API-PARITY.md).
+        void UiApi(HttpListenerContext ctx, string path)
+        {
+            HttpListenerRequest req = ctx.Request;
+            HttpListenerResponse res = ctx.Response;
+            string method = req.HttpMethod;
+            res.AddHeader("Cache-Control", "no-store");
+            if (path == "/api/session")
+            {
+                if (method != "POST") { Error(res, 405, "use POST", "invalid_request_error"); return; }
+                if (!Authorized(req, res)) return;
+                Send(res, 200, new Dictionary<string, object> { { "schema", "windlass.ui.session/1" }, { "token", _token }, { "apiKeyRequired", !string.IsNullOrEmpty(_s.ApiKey) } });
+                return;
+            }
+            if (path == "/api/heartbeat")
+            {
+                if (method != "POST") { Error(res, 405, "use POST", "invalid_request_error"); return; }
+                Dictionary<string, object> body = ReadBody(req);
+                object v;
+                string given = req.Headers["X-Windlass-Session"];
+                if (string.IsNullOrEmpty(given) && body != null && body.TryGetValue("token", out v) && v is string) given = (string)v;
+                if (!TokenOk(given)) { Error(res, 401, "missing or wrong session token", "authentication_error"); return; }
+                Dictionary<string, object> hb = new Dictionary<string, object>();
+                hb["ok"] = true;
+                hb["ownsLife"] = _s.UiOwnsLife;
+                hb["autoStop"] = _presence.Enabled && _s.UiOwnsLife;
+                hb["timeoutSeconds"] = Presence.TimeoutSeconds;
+                hb["leavingGraceSeconds"] = Presence.LeavingGraceSeconds;
+                // Only a server started with --open belongs to its tab. One started for other programs (Fairlead) is not
+                // stopped by someone opening the page and closing it again.
+                if (_s.UiOwnsLife)
+                {
+                    string tab = "";
+                    bool leaving = false;
+                    if (body != null && body.TryGetValue("tab", out v) && v is string) tab = ((string)v).Length > 40 ? ((string)v).Substring(0, 40) : (string)v;
+                    if (body != null && body.TryGetValue("leaving", out v) && v is bool) leaving = (bool)v;
+                    _presence.Heartbeat("ui-" + tab, leaving, Now());
+                }
+                Send(res, 200, hb);
+                return;
+            }
+            if (!TokenOk(req.Headers["X-Windlass-Session"])) { Error(res, 401, "missing or wrong session token", "authentication_error"); return; }
+            if (path == "/api/status" && method == "GET") { Send(res, 200, UiStatus()); return; }
+            if (path == "/api/playbook" && method == "GET")
+            {
+                string json = _backend.PlaybookJson();
+                object pb = null;
+                if (json != null) { try { pb = Json.Parse(json); } catch (FormatException) { } }
+                Send(res, 200, new Dictionary<string, object> { { "schema", "windlass.ui.playbook/1" }, { "playbook", pb } });
+                return;
+            }
+            if (path == "/api/logs" && method == "GET")
+            {
+                long after = 0;
+                long.TryParse(req.QueryString["after"] ?? "0", out after);
+                long last;
+                List<object> lines = new List<object>();
+                foreach (KeyValuePair<long, string> kv in Log.Tail(after, out last))
+                    lines.Add(new Dictionary<string, object> { { "seq", kv.Key }, { "text", kv.Value.Length > 2000 ? kv.Value.Substring(0, 2000) : kv.Value } });
+                Send(res, 200, new Dictionary<string, object> { { "schema", "windlass.ui.logs/1" }, { "lines", lines }, { "last", last } });
+                return;
+            }
+            if (path == "/api/models" && method == "GET")
+            {
+                try { Send(res, 200, ModelBrowser.List(req.QueryString["dir"], _s.RecentFile)); }
+                catch (BackendException e) { Error(res, e.Status, e.Message, e.Kind); }
+                return;
+            }
+            if (path == "/api/model" && method == "POST")
+            {
+                SwitchableBackend sw = _backend as SwitchableBackend;
+                if (sw == null) { Error(res, 400, "this server runs a stub model; start it without --stub to load models", "invalid_request_error"); return; }
+                Dictionary<string, object> body = ReadBody(req);
+                object v;
+                string file = body != null && body.TryGetValue("path", out v) && v is string ? (string)v : null;
+                try
+                {
+                    string full = ModelBrowser.CheckModelFile(file);
+                    if (_sched.Busy || _sched.Waiting > 0) throw new BackendException("Windlass is writing a reply; wait for it to finish, then change the model", 409, "server_busy");
+                    sw.Swap(full);
+                    Send(res, 202, new Dictionary<string, object> { { "schema", "windlass.ui.model/1" }, { "state", StateName() }, { "path", full }, { "id", LayeredBackend.DefaultId(full) } });
+                }
+                catch (BackendException e) { Error(res, e.Status, e.Message, e.Kind); }
+                return;
+            }
+            if (path == "/api/model/unload" && method == "POST")
+            {
+                SwitchableBackend sw = _backend as SwitchableBackend;
+                if (sw == null) { Error(res, 400, "this server runs a stub model; there is nothing to unload", "invalid_request_error"); return; }
+                try
+                {
+                    if (_sched.Busy || _sched.Waiting > 0) throw new BackendException("Windlass is writing a reply; wait for it to finish, then unload the model", 409, "server_busy");
+                    sw.Swap(null);
+                    Send(res, 200, new Dictionary<string, object> { { "schema", "windlass.ui.model/1" }, { "state", StateName() }, { "path", null }, { "id", null } });
+                }
+                catch (BackendException e) { Error(res, e.Status, e.Message, e.Kind); }
+                return;
+            }
+            if (path == "/api/shutdown" && method == "POST")
+            {
+                Send(res, 200, new Dictionary<string, object> { { "stopping", true } });
+                Log.Info("shutdown requested from the browser UI");
+                ThreadPool.QueueUserWorkItem(delegate { Thread.Sleep(200); Stop(); });
+                return;
+            }
+            Error(res, 404, "no route for " + method + " " + path, "not_found_error");
+        }
+
+        // GET /api/status (windlass.ui.status/1): what the Overview page and the status bar show. Reads snapshots only.
+        Dictionary<string, object> UiStatus()
+        {
+            Dictionary<string, object> st = new Dictionary<string, object>();
+            st["schema"] = "windlass.ui.status/1";
+            st["version"] = _s.Version;
+            st["state"] = StateName();
+            st["loadError"] = _backend.LoadError;
+            SwitchableBackend sw = _backend as SwitchableBackend;
+            Dictionary<string, object> model = new Dictionary<string, object>();
+            model["id"] = _backend.State == BackendState.Idle ? null : _backend.ModelId;
+            model["path"] = sw != null ? sw.ModelPath : null;
+            model["contextLength"] = _backend.State == BackendState.Ready ? (object)_backend.ContextLength : null;
+            st["model"] = model;
+            st["canSwap"] = sw != null;
+            st["busy"] = _sched.Busy;
+            st["queued"] = _sched.Waiting;
+            st["queueMax"] = _s.MaxQueue;
+            st["address"] = "127.0.0.1:" + _s.Port;
+            st["apiKeyRequired"] = !string.IsNullOrEmpty(_s.ApiKey);
+            st["batch"] = _s.Batch;
+            st["stub"] = _s.Stub;
+            st["startedAt"] = _started.ToString("o");
+            st["uptimeSeconds"] = (long)(DateTime.UtcNow - _started).TotalSeconds;
+            Dictionary<string, object> auto = new Dictionary<string, object>();
+            auto["enabled"] = _presence.Enabled;
+            auto["ownsLife"] = _s.UiOwnsLife;
+            auto["armed"] = _presence.Armed;
+            st["autoStop"] = auto;
+            st["windlass"] = WindlassFacts();
+            return st;
         }
 
         string StateName()
@@ -350,6 +548,7 @@ namespace Windlass
             {
                 case BackendState.Ready: return "ready";
                 case BackendState.Error: return "error";
+                case BackendState.Idle: return "idle";
                 default: return "loading";
             }
         }
@@ -482,6 +681,12 @@ namespace Windlass
             HttpListenerResponse res = ctx.Response;
             string text;
             using (StreamReader r = new StreamReader(ctx.Request.InputStream, new UTF8Encoding(false))) text = r.ReadToEnd();
+            if (_backend.State == BackendState.Idle)
+            {
+                res.AddHeader("Retry-After", "30");
+                Error(res, 503, "no model is loaded; load one in the Windlass UI or start it with --model", "no_model");
+                return;
+            }
             object parsed;
             try { parsed = Json.Parse(text); }
             catch (Exception) { Error(res, 400, "request body is not valid JSON", "invalid_request_error"); return; }

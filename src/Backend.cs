@@ -31,7 +31,7 @@ namespace Windlass
         public GenerationResult(string finish, int prompt, int completion) { FinishReason = finish; PromptTokens = prompt; CompletionTokens = completion; }
     }
 
-    public enum BackendState { Loading, Ready, Error }
+    public enum BackendState { Idle, Loading, Ready, Error }   // Idle: no model loaded (serve without --model, or after an unload)
 
     public abstract class Backend : IDisposable
     {
@@ -53,6 +53,10 @@ namespace Windlass
         // (ModelFacts.Shape lists the keys). A plain dictionary of nested dictionaries; keys it does not know are left
         // out and published as null. Must not wait for a running generation.
         public virtual Dictionary<string, object> Facts() { return new Dictionary<string, object>(); }
+
+        // The machine playbook as a windlass.playbook/1 JSON document, for the browser UI; null when there is none (set by
+        // hand, --no-playbook, or a stub). Must not wait for a running generation.
+        public virtual string PlaybookJson() { return null; }
 
         public virtual void Dispose() { }
     }

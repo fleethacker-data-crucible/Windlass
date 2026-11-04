@@ -17,7 +17,8 @@ namespace Windlass
         public const string Usage =
 @"Windlass: run very large GGUF models one layer at a time, behind an OpenAI-compatible API.
 
-  Launch-Windlass.bat serve --model <file.gguf> [options]   run the server on http://127.0.0.1:8777/v1
+  Launch-Windlass.bat serve [--model <file.gguf>] [options]   run the server on http://127.0.0.1:8777/v1 (without --model
+                          it starts empty and the browser UI loads a model)
   Launch-Windlass.bat run   --model <file.gguf> --prompt <text> [options]   one reply in the console
   Launch-Windlass.bat info  --model <file.gguf>   model shape, sizes and RAM needed
   Launch-Windlass.bat playbook probe --model <file.gguf> [--json] [--out <file>]
@@ -37,7 +38,8 @@ JSON document instead of text; --out writes it to a file as UTF-8 without a BOM.
 2 a usage error.
 
 Options:
-  --model <path>          a .gguf file (for a split model, any one of its -0000N-of-0000M.gguf parts)
+  --model <path>          a .gguf file (for a split model, any one of its -0000N-of-0000M.gguf parts); serve can do without it
+                          and load one from the browser UI, which can also swap it later
   --model-id <id>         id published in /v1/models (default: the file name)
   --port <n>              port (default: the first free port in 8777-8779)
   --api-key <key>         require 'Authorization: Bearer <key>' (default: $env:WINDLASS_API_KEY)
@@ -48,6 +50,10 @@ Options:
   --int-dot               integer dot products with 8-bit activations, llama.cpp's CPU method (default off; logits move slightly)
   --no-playbook           ignore the playbook; use the defaults and the options given
   --no-auto-stop          do not stop when the programs that sent heartbeats are gone (or set WINDLASS_AUTO_STOP=0)
+  --open                  serve: open the browser UI, and stop when its tab closes (the tab owns the server; add
+                          --no-auto-stop to keep serving after it closes). Without --open the UI is still at the
+                          server's address, but closing it never stops the server
+  --no-ui                 serve: the API only, no browser UI
   --guess / --no-guess    guess-ahead for greedy replies on or off (default: the playbook's choice, else off)
   --batch <n>             serve: let up to n requests generate together, one pass over the layers per step for all
                           of them (default 1 = one at a time). Each adds a KV cache; guess-ahead is off
@@ -108,7 +114,7 @@ Options:
             }
         }
 
-        static readonly string[] Flags = { "int-dot", "no-auto-stop", "no-prefetch", "no-playbook", "stub", "verbose", "json", "guess", "no-guess" };
+        static readonly string[] Flags = { "int-dot", "no-auto-stop", "no-prefetch", "no-playbook", "stub", "verbose", "json", "guess", "no-guess", "open", "no-ui" };
 
         public static Dictionary<string, string> ParseArgs(string[] args, int from)
         {
@@ -396,7 +402,7 @@ Options:
         // commands: the CLI describes itself, so an agent can find every command and its inputs and outputs.
         static readonly string[][] CommandList =
         {
-            new[] { "serve", "--model [--model-id --port --api-key --context-length --cache-gb --no-prefetch --threads --int-dot --guess --no-guess --batch --no-playbook --chat-template --max-tokens --max-queue --keepalive --no-auto-stop --stub --verbose]", "an OpenAI-compatible server on 127.0.0.1 (see docs/API.md)" },
+            new[] { "serve", "--model [--model-id --port --api-key --context-length --cache-gb --no-prefetch --threads --int-dot --guess --no-guess --batch --no-playbook --chat-template --max-tokens --max-queue --keepalive --no-auto-stop --open --no-ui --stub --verbose]", "an OpenAI-compatible server and browser UI on 127.0.0.1 (see docs/API.md)" },
             new[] { "run", "--model --prompt [--system --max-tokens --temperature and the serve options above]", "one reply in the console" },
             new[] { "info", "--model", "the model's shape, sizes and RAM needs (text)" },
             new[] { "playbook probe", "--model [--model-id --json --out]", "windlass.playbook/1: machine, measurements, settings, rules; saved in playbooks\\" },
@@ -501,6 +507,12 @@ Options:
             s.Version = version;
             s.ScriptPath = scriptPath;
             s.AutoStop = !o.ContainsKey("no-auto-stop") && Environment.GetEnvironmentVariable("WINDLASS_AUTO_STOP") != "0";
+            string uiRoot = Path.Combine(root, "ui", "dist");
+            if (!o.ContainsKey("no-ui") && Directory.Exists(uiRoot)) s.UiRoot = uiRoot;
+            s.UiOwnsLife = o.ContainsKey("open") && s.UiRoot != null;
+            s.Batch = o.ContainsKey("batch") ? Int(o, "batch", 1, 1, BatchPlan.MaxBatch) : 1;
+            s.Stub = o.ContainsKey("stub");
+            s.RecentFile = Path.Combine(root, "playbooks", "recent-models.txt");
 
             Backend backend;
             if (o.ContainsKey("stub"))
@@ -510,7 +522,25 @@ Options:
                 stub.TokenDelayMs = 200;
                 backend = stub;
             }
-            else backend = new LayeredBackend(Engine(o, root));
+            else
+            {
+                // The model can be loaded, swapped and unloaded from the browser UI, so the engine sits behind a SwitchableBackend.
+                // --model loads one at start (a bad file still stops the start with its message, as before); without it the
+                // server starts idle and the page asks for one. Every other option applies to each model that is loaded.
+                if (!o.ContainsKey("model") && s.UiRoot == null)
+                    throw new ArgumentException("--model is required (without the browser UI there is nowhere to choose a model). Run Launch-Windlass.bat help.");
+                Func<string, Backend> factory = delegate(string file)
+                {
+                    Dictionary<string, string> o2 = new Dictionary<string, string>(o);
+                    o2["model"] = file;
+                    o2.Remove("model-id");
+                    return new LayeredBackend(Engine(o2, root));
+                };
+                Backend initial = null;
+                string initialPath = null;
+                if (o.ContainsKey("model")) { initial = new LayeredBackend(Engine(o, root)); initialPath = Path.GetFullPath(o["model"]); }
+                backend = new SwitchableBackend(factory, s.Batch, initial, initialPath);
+            }
 
             string logs = Path.Combine(root, "logs");
             Log.ToFile(Path.Combine(logs, "Windlass_" + DateTime.Now.ToString("yyyy_MM_dd_HHmmss") + ".log"));
@@ -524,6 +554,9 @@ Options:
                 rt["started"] = DateTime.UtcNow.ToString("o");
                 try { File.WriteAllText(runtimeFile, Json.Write(rt)); } catch (IOException) { }
                 Log.Info("Windlass " + version + " on http://127.0.0.1:" + s.Port + "/v1 (Ctrl+C or Stop-Windlass.ps1 to stop)");
+                if (backend.State == BackendState.Idle) Log.Info("No model is loaded: choose one in the browser UI.");
+                if (s.UiRoot != null)
+                    Log.Info("Browser UI at http://127.0.0.1:" + s.Port + "/" + (s.UiOwnsLife ? (s.AutoStop ? " (stops when its tab closes)" : " (keeps serving after its tab closes)") : " (closing it does not stop the server)"));
                 if (string.IsNullOrEmpty(s.ApiKey)) Log.Info("No API key set: any program on this PC can use the model.");
                 Console.CancelKeyPress += delegate(object sender, ConsoleCancelEventArgs e) { e.Cancel = true; Log.Info("stopping"); server.Stop(); };
                 server.Stopped.WaitOne();
