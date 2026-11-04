@@ -69,10 +69,14 @@ namespace Windlass.Tests
                 // Only files found under the folder, only types on the list, never anything built from the request text.
                 ExpectError(Call("GET", "/assets/missing.js", null), 404, "not_found_error");
                 ExpectError(Call("GET", "/assets/tool.exe", null), 404, "not_found_error");
-                ExpectError(Call("GET", "/../outside-ui.txt", null), 404, "not_found_error");
-                ExpectError(Call("GET", "/%2e%2e/outside-ui.txt", null), 404, "not_found_error");
-                ExpectError(Call("GET", "/assets/..%2f..%2foutside-ui.txt", null), 404, "not_found_error");
-                ExpectError(Call("GET", "/assets/%5c..%5coutside-ui.txt", null), 404, "not_found_error");
+                // Encoded dot-dot and backslash forms may be refused by Windows' HTTP.sys itself (400 or 403) before Windlass sees
+                // them, or answered 404 by Windlass; either is safe. What must never happen is the file being served.
+                foreach (string bad in new string[] { "/../outside-ui.txt", "/%2e%2e/outside-ui.txt", "/assets/..%2f..%2foutside-ui.txt", "/assets/%5c..%5coutside-ui.txt" })
+                {
+                    Resp r = Call("GET", bad, null);
+                    Check(r.Status == 400 || r.Status == 403 || r.Status == 404, "a traversal path is refused or not found, not served: " + bad + " gave " + r.Status);
+                    Check(!r.Body.Contains("secret outside"), "the file outside the UI folder is never served: " + bad);
+                }
                 ExpectError(Call("POST", "/", ""), 404, "not_found_error");
 
                 // The API and the page share one server, so the rules of the API still hold for the page.
