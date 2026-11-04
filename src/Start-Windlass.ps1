@@ -27,6 +27,7 @@ New-Item -ItemType Directory -Force $env:TEMP | Out-Null
 $version = ([string](Get-Content -LiteralPath (Join-Path $root 'VERSION') -TotalCount 1 -ErrorAction SilentlyContinue)).Trim()
 if (-not $version) { $version = '0.0.0' }
 $cliArgs = @($args | ForEach-Object { [string]$_ })
+. (Join-Path $here 'Tray.ps1')
 
 # Opens the browser at $Url once the server there answers /__fleethacker/id. Runs in this process on its own thread, so it
 # works while the engine blocks the main one; gives up after two minutes.
@@ -56,6 +57,11 @@ function Start-BrowserWhenReady([string]$Url) {
 # A double-click passes no arguments: serve with the browser UI, which asks which model to load.
 if ($cliArgs.Count -eq 0 -and [Environment]::UserInteractive) { $cliArgs = @('serve', '--open') }
 $command = if ($cliArgs.Count -gt 0) { $cliArgs[0] } else { '' }
+
+# serve --open at a desktop session shows a notification-area icon (Tray.ps1): the engine then outlives the browser window and
+# stops only on Quit (or End session, Ctrl+C, Stop-Windlass.ps1). --no-tray keeps the old behaviour: the tab owns the server.
+$trayPlan = Get-WindlassTrayPlan -CliArgs $cliArgs
+$cliArgs = @($trayPlan.Args)
 
 # Locality checks: Windlass makes no outgoing connections and starts no processes. Only Server.cs may use
 # HttpListener (bound to 127.0.0.1 and localhost). No P/Invoke, no dynamic assembly loading.
@@ -98,7 +104,7 @@ if ($command -eq 'serve' -and -not ($cliArgs | Where-Object { $_ -eq '--port' -o
         Write-Host "Windlass $($fleet.Existing.Version) is already running on http://127.0.0.1:$($fleet.Port)/v1 (pid $($fleet.Existing.Pid)). Stop it with src\Stop-Windlass.ps1 first."
         if ($cliArgs -contains '--open') {
             Write-Host 'Opening its browser UI.'
-            Start-Process "http://127.0.0.1:$($fleet.Port)/"
+            Open-WindlassWindow -Url "http://127.0.0.1:$($fleet.Port)/"
         }
         exit 0
     }
@@ -106,7 +112,7 @@ if ($command -eq 'serve' -and -not ($cliArgs | Where-Object { $_ -eq '--port' -o
 }
 
 # serve --open: the browser UI opens when the server answers. The port is --port, or the one picked above.
-if ($command -eq 'serve' -and ($cliArgs -contains '--open')) {
+if ($command -eq 'serve' -and ($cliArgs -contains '--open') -and -not $trayPlan.Tray) {
     $uiPort = 8777
     for ($i = 0; $i -lt $cliArgs.Count; $i++) {
         if ($cliArgs[$i] -eq '--port' -and ($i + 1) -lt $cliArgs.Count) { $uiPort = [int]$cliArgs[$i + 1] }
@@ -145,5 +151,8 @@ Add-Type -Path $paths -CompilerParameters $cp
 if ($command -eq 'check') {
     Write-Host "Windlass $version`: locality checks passed and the C# compiled."
     exit 0
+}
+if ($trayPlan.Tray) {
+    exit (Start-WindlassTray -CliArgs ([string[]]$cliArgs) -Root $root -ScriptPath $PSCommandPath -Version $version -IconPath (Join-Path $root "assets\brand\tray.ico"))
 }
 exit ([Windlass.Program]::Run([string[]]$cliArgs, $root, $PSCommandPath, $version))

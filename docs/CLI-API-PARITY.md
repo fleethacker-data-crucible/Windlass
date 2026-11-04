@@ -22,7 +22,7 @@ with the gaps stated. `Launch-Windlass.bat commands --json` (`windlass.commands/
 | Identify the tool, find its pid | none | `GET /__fleethacker/id` | JSON: tool, version, pid |
 | Stop | `src\Stop-Windlass.ps1` | `POST /__fleethacker/shutdown` (header `X-FleetHacker-Shutdown: 1`), `POST /api/shutdown` (UI session token) | `{"stopping": true}` |
 | Say that an owner is still there | none | `POST /__fleethacker/heartbeat` (header `X-FleetHacker-Heartbeat: 1`), `POST /api/heartbeat` (the UI's tab, `serve --open` only) | `{"ok": true, ...}` |
-| Open the browser UI | `serve --open` (`--no-ui` turns the UI off) | `GET /` | the page |
+| Open the browser UI | `serve --open` (`--no-ui` turns the UI off; `--no-tray` keeps the tab in charge of the server instead of the tray icon) | `GET /` | the page |
 | Get a UI session | none | `POST /api/session` (the API key when one is set) | `windlass.ui.session/1` |
 | Show the live state | none | `GET /api/status` | `windlass.ui.status/1` (the `windlass` object of `GET /v1/models` plus state, queue, address) |
 | Load, swap or unload the model | `serve --model` (at start) | `POST /api/model`, `POST /api/model/unload` | 202 `windlass.ui.model/1`; watch `GET /api/status` |

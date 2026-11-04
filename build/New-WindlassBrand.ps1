@@ -1,12 +1,12 @@
 #requires -Version 5.1
 <#
 .SYNOPSIS
-  Renders the brand assets made from source: the mark as PNG, favicon.ico, and (only while assets\brand\emblem-source.html exists) the placeholder emblems.
+  Renders the brand assets made from source: the mark as PNG, favicon.ico, tray.ico, and (only while assets\brand\emblem-source.html exists) the placeholder emblems.
 .DESCRIPTION
   Build-machine only. Uses headless Edge (or Chrome) to render assets\brand\mark.svg to PNG with a transparent
   background, then packs PNG frames into favicon.ico. The emblem step renders assets\brand\emblem-source.html (the
   placeholder) to emblem-light.png and emblem-dark.png; delete that source once the detailed original emblem is in,
-  and the step is skipped. -MarkOnly skips it in any case. Windlass has no tray icon, so there is no tray.ico.
+  and the step is skipped. -MarkOnly skips it in any case. tray.ico (16, 20, 24, 32) is the same mark for the notification-area icon.
 #>
 [CmdletBinding()]
 param([switch]$MarkOnly)
@@ -69,9 +69,10 @@ try {
     $wrap = Join-Path $tmp 'mark.html'
     Set-Content -Path $wrap -Encoding UTF8 -Value ('<!doctype html><html><body style="margin:0;background:transparent"><img src="' + $markUrl + '" width="512" height="512" style="display:block"></body></html>')
     Render ([Uri]$wrap).AbsoluteUri $markBig 512 512
-    foreach ($s in @(16, 32, 48, 256)) { Resize $markBig (Join-Path $tmp "mark-$s.png") $s }
+    foreach ($s in @(16, 20, 24, 32, 48, 256)) { Resize $markBig (Join-Path $tmp "mark-$s.png") $s }
     Copy-Item (Join-Path $tmp 'mark-256.png') (Join-Path $brand 'mark-256.png') -Force
     Write-Ico (Join-Path $brand 'favicon.ico') @((Join-Path $tmp 'mark-16.png'), (Join-Path $tmp 'mark-32.png'), (Join-Path $tmp 'mark-48.png'), (Join-Path $tmp 'mark-256.png'))
+    Write-Ico (Join-Path $brand 'tray.ico') @((Join-Path $tmp 'mark-16.png'), (Join-Path $tmp 'mark-20.png'), (Join-Path $tmp 'mark-24.png'), (Join-Path $tmp 'mark-32.png'))
     if (-not $MarkOnly -and (Test-Path (Join-Path $brand 'emblem-source.html'))) {
         foreach ($theme in @('light', 'dark')) {
             $raw = Join-Path $tmp "emblem-$theme-raw.png"

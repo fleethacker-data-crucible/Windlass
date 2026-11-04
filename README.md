@@ -33,7 +33,7 @@ A *windlass* is the heavy winch at a ship's bow that hauls the anchor chain in l
 4. Your browser opens the **UI** at **`http://127.0.0.1:8777/`**, and the API answers on **`http://127.0.0.1:8777/v1`**
    (the first free port in 8777-8779). The console shows the log. Without `--open` nothing opens and nothing stops when a
    tab closes; the page is still at the same address ([docs/UI.md](docs/UI.md)).
-5. To stop: **End session** in the UI, **Ctrl+C**, or `src\Stop-Windlass.ps1`. With `--open`, closing the tab stops it too.
+5. To stop: **Quit Windlass** on the tray icon, **End session** in the UI, **Ctrl+C**, or `src\Stop-Windlass.ps1`. With `--open` an icon appears in the notification area and Windlass keeps running when you close the browser window, so programs such as Fairlead can still use it (`--no-tray`: closing the tab stops it instead).
 
 Windlass sets itself up for the computer it runs on (free RAM, cores, battery): `Launch-Windlass.bat playbook probe --model <file>` measures this computer once and shows the settings it picked and why. Before a long run, `Launch-Windlass.bat info --model <file>` prints the model's shape and the RAM it needs, and `Launch-Windlass.bat run --model <file> --prompt "Hi"` gives one reply in the console. All commands and options: [docs/USAGE.md](docs/USAGE.md).
 
