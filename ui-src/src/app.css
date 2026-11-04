@@ -81,6 +81,7 @@
   .fl-badge svg { width: 12px; height: 12px; stroke-width: 2; }
   .fl-eyebrow { font-size: var(--fl-text-caption); font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--fl-muted-foreground); }
   .fl-dialog { padding: 0; color: var(--fl-foreground); max-width: min(520px, calc(100vw - 32px)); width: 100%; }
+  .fl-dialog.wide { max-width: min(720px, calc(100vw - 32px)); }
   .fl-toast { background: var(--fl-popover); border: 1px solid var(--fl-border-strong); border-radius: var(--fl-radius-control); box-shadow: var(--fl-shadow); padding: 10px 12px; font-size: var(--fl-text-secondary); display: flex; gap: 8px; align-items: flex-start; }
   .fl-table td.num, .fl-table th.num { text-align: right; }
   .fl-skeleton { background: linear-gradient(90deg, var(--fl-muted) 0%, var(--fl-border) 40%, var(--fl-muted) 80%); background-size: 200% 100%; animation: wl-shimmer 1.4s linear infinite; border-radius: var(--fl-radius-control); }

@@ -25,6 +25,8 @@ with the gaps stated. `Launch-Windlass.bat commands --json` (`windlass.commands/
 | Open the browser UI | `serve --open` (`--no-ui` turns the UI off) | `GET /` | the page |
 | Get a UI session | none | `POST /api/session` (the API key when one is set) | `windlass.ui.session/1` |
 | Show the live state | none | `GET /api/status` | `windlass.ui.status/1` (the `windlass` object of `GET /v1/models` plus state, queue, address) |
+| Load, swap or unload the model | `serve --model` (at start) | `POST /api/model`, `POST /api/model/unload` | 202 `windlass.ui.model/1`; watch `GET /api/status` |
+| Browse for a model file | none | `GET /api/models?dir=` | `windlass.ui.models/1` |
 | Show the playbook in use | `playbook show` | `GET /api/playbook` | `windlass.ui.playbook/1` around `windlass.playbook/1` |
 | Read the log | the file in `logs\` | `GET /api/logs?after=N` | `windlass.ui.logs/1` |
 

@@ -1,6 +1,10 @@
 <script lang="ts">
   import { session } from '$lib/session.svelte';
   import { copyText } from '$lib/copy';
+  import { picker } from '$lib/picker.svelte';
+  import { confirm } from '$lib/confirm.svelte';
+  import { unloadModel, ApiError } from '$lib/api';
+  import { toast } from '$lib/toast.svelte';
   import { DASH, formatBytes, formatDuration, formatNumber, formatSecPerToken, formatTokensPerSecond, formatPercent, formatTime } from '$lib/format';
   import PageHeader from '$components/PageHeader.svelte';
   import Stat from '$components/Stat.svelte';
@@ -8,6 +12,8 @@
   import CircleCheck from '@lucide/svelte/icons/circle-check';
   import CircleX from '@lucide/svelte/icons/circle-x';
   import Loader from '@lucide/svelte/icons/loader';
+  import FolderOpen from '@lucide/svelte/icons/folder-open';
+  import CirclePause from '@lucide/svelte/icons/circle-pause';
 
   const s = $derived(session.status);
   const w = $derived(s?.windlass);
@@ -17,16 +23,37 @@
   const base = $derived(s ? `http://${s.address}/v1` : '');
   const sourceLabel: Record<string, string> = { 'real-runs': 'averaged over real replies on this computer', probe: 'predicted by playbook probe', eval: 'measured by playbook eval', none: '' };
   const fid = $derived(w?.fidelity);
+  const fileName = $derived(s?.model.path ? s.model.path.replace(/^.*[\\/]/, '') : '');
+
+  async function unload() {
+    const ok = await confirm({ title: 'Unload the model?', description: 'Windlass keeps running and frees the model\'s memory. Requests get a 503 until you load one again.', confirmLabel: 'Unload', destructive: false });
+    if (!ok) return;
+    try {
+      await unloadModel();
+      await session.refresh();
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : 'Windlass did not answer.');
+    }
+  }
 </script>
 
-<PageHeader title="Overview" />
+<PageHeader title="Overview">
+  {#snippet actions()}
+    {#if s?.canSwap}
+      {#if s.state !== 'idle'}<button class="fl-btn fl-btn--secondary" onclick={unload} data-testid="unload">Unload</button>{/if}
+      <button class="fl-btn fl-btn--primary" onclick={() => picker.show()} data-testid="open-picker"><FolderOpen aria-hidden="true" /> {s.state === 'idle' ? 'Load a model' : 'Change model'}</button>
+    {/if}
+  {/snippet}
+</PageHeader>
 <div class="min-h-0 flex-1 overflow-y-auto">
   {#if !s}
     <div class="mx-auto grid max-w-[1120px] gap-4 p-6" aria-busy="true"><div class="fl-skeleton h-20"></div><div class="fl-skeleton h-40"></div></div>
   {:else}
     <div class="mx-auto grid max-w-[1120px] gap-4 p-6">
       <section class="fl-card flex flex-wrap items-center gap-4" aria-label="Model state" data-testid="state-card">
-        {#if s.state === 'ready'}
+        {#if s.state === 'idle'}
+          <span class="fl-badge fl-badge--muted"><CirclePause aria-hidden="true" /> No model</span>
+        {:else if s.state === 'ready'}
           <span class="fl-badge fl-badge--success"><CircleCheck aria-hidden="true" /> Ready</span>
         {:else if s.state === 'loading'}
           <span class="fl-badge fl-badge--info"><Loader aria-hidden="true" class="wl-pulse" /> Loading</span>
@@ -34,10 +61,11 @@
           <span class="fl-badge fl-badge--danger"><CircleX aria-hidden="true" /> Failed</span>
         {/if}
         <div class="min-w-0 flex-1">
-          <div class="truncate text-[16px] font-semibold" data-testid="model-id">{s.model.id}</div>
+          <div class="truncate text-[16px] font-semibold" data-testid="model-id">{s.model.id ?? 'No model loaded'}</div>
           <div class="text-[13px] text-muted-foreground">
-            {#if s.state === 'ready'}{s.busy ? `Writing a reply${s.queued > 0 ? `, ${s.queued} waiting` : ''}.` : 'Idle. Waiting for a request.'}
-            {:else if s.state === 'loading'}Reading the model's header and tables. Requests get a 503 until it is ready.
+            {#if s.state === 'idle'}{s.canSwap ? 'Choose a .gguf file to load. Requests get a 503 until one is ready.' : 'No model is loaded.'}
+            {:else if s.state === 'ready'}{s.busy ? `Writing a reply${s.queued > 0 ? `, ${s.queued} waiting` : ''}.` : 'Idle. Waiting for a request.'}
+            {:else if s.state === 'loading'}Loading {fileName || 'the model'}: reading its header and tables. Requests get a 503 until it is ready.
             {:else}{s.loadError ?? 'The model did not load.'} See the Log page.{/if}
             {#if s.stub} This is a stub server: a canned reply, no model.{/if}
           </div>
@@ -56,6 +84,7 @@
             <Stat label="Context allowed" value={w?.contextLength == null ? null : `${formatNumber(w.contextLength)} tokens`} hint="Known once the model has loaded" />
             <Stat label="Model maximum" value={w?.modelContextLength == null ? null : `${formatNumber(w.modelContextLength)} tokens`} hint="Known once the model has loaded" />
           </div>
+          {#if s.model.path}<p class="mt-3 truncate font-mono text-[12px] text-muted-foreground" title={s.model.path} data-testid="model-path-shown">{s.model.path}</p>{/if}
         </section>
 
         <section class="fl-card" aria-labelledby="h-speed">

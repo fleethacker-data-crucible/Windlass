@@ -37,6 +37,7 @@ namespace Windlass
         public string SessionToken;            // the UI session token; made when null (tests pass a known one)
         public int Batch = 1;                  // shown in the UI
         public bool Stub;                      // shown in the UI
+        public string RecentFile;              // playbooks\recent-models.txt: models loaded from the UI, newest first (null = not remembered)
     }
 
     // The running jobs (one, or the batch size) and a bounded FIFO of waiting ones.
@@ -127,6 +128,8 @@ namespace Windlass
             _ui = settings.UiRoot != null ? new UiAssets(settings.UiRoot) : null;
             if (_ui != null && !_ui.Available) { Log.Warn("no browser UI at " + settings.UiRoot + " (index.html is missing); serving the API only"); _ui = null; }
             _token = settings.SessionToken ?? UiToken.New();
+            SwitchableBackend sw = backend as SwitchableBackend;
+            if (sw != null && settings.RecentFile != null) sw.Loaded = delegate(string path) { ModelBrowser.Remember(settings.RecentFile, path); };
             _presence = new Presence(settings.AutoStop);
             _sched = new Scheduler(settings.MaxQueue, backend.MaxConcurrent);
         }
@@ -339,12 +342,12 @@ namespace Windlass
                 {
                     Dictionary<string, object> list = new Dictionary<string, object>();
                     list["object"] = "list";
-                    list["data"] = new List<object> { ModelCard() };
+                    list["data"] = _backend.State == BackendState.Idle ? new List<object>() : new List<object> { ModelCard() };
                     Send(res, 200, list);
                     return;
                 }
                 string id = Uri.UnescapeDataString(path.Substring("/v1/models/".Length));
-                if (id != _backend.ModelId) { Error(res, 404, "model '" + id + "' not found", "not_found_error"); return; }
+                if (_backend.State == BackendState.Idle || id != _backend.ModelId) { Error(res, 404, "model '" + id + "' not found", "not_found_error"); return; }
                 Send(res, 200, ModelCard());
                 return;
             }
@@ -396,7 +399,8 @@ namespace Windlass
 
         // POST /api/session   (the API key, when one is set) -> the session token the other /api/ routes need
         // POST /api/heartbeat (token in the header, or in the body for the page-close beacon) -> the Presence rule
-        // GET  /api/status, /api/playbook, /api/logs, POST /api/shutdown   (token in the X-Windlass-Session header)
+        // GET  /api/status, /api/playbook, /api/logs, /api/models, POST /api/model, /api/model/unload, /api/shutdown   (token in the
+// X-Windlass-Session header). /api/model loads or swaps the model; it is refused (409) while a reply is running or queued.
         // Every action here also exists as a CLI command or a documented route (docs/CLI-API-PARITY.md).
         void UiApi(HttpListenerContext ctx, string path)
         {
@@ -459,6 +463,42 @@ namespace Windlass
                 Send(res, 200, new Dictionary<string, object> { { "schema", "windlass.ui.logs/1" }, { "lines", lines }, { "last", last } });
                 return;
             }
+            if (path == "/api/models" && method == "GET")
+            {
+                try { Send(res, 200, ModelBrowser.List(req.QueryString["dir"], _s.RecentFile)); }
+                catch (BackendException e) { Error(res, e.Status, e.Message, e.Kind); }
+                return;
+            }
+            if (path == "/api/model" && method == "POST")
+            {
+                SwitchableBackend sw = _backend as SwitchableBackend;
+                if (sw == null) { Error(res, 400, "this server runs a stub model; start it without --stub to load models", "invalid_request_error"); return; }
+                Dictionary<string, object> body = ReadBody(req);
+                object v;
+                string file = body != null && body.TryGetValue("path", out v) && v is string ? (string)v : null;
+                try
+                {
+                    string full = ModelBrowser.CheckModelFile(file);
+                    if (_sched.Busy || _sched.Waiting > 0) throw new BackendException("Windlass is writing a reply; wait for it to finish, then change the model", 409, "server_busy");
+                    sw.Swap(full);
+                    Send(res, 202, new Dictionary<string, object> { { "schema", "windlass.ui.model/1" }, { "state", StateName() }, { "path", full }, { "id", LayeredBackend.DefaultId(full) } });
+                }
+                catch (BackendException e) { Error(res, e.Status, e.Message, e.Kind); }
+                return;
+            }
+            if (path == "/api/model/unload" && method == "POST")
+            {
+                SwitchableBackend sw = _backend as SwitchableBackend;
+                if (sw == null) { Error(res, 400, "this server runs a stub model; there is nothing to unload", "invalid_request_error"); return; }
+                try
+                {
+                    if (_sched.Busy || _sched.Waiting > 0) throw new BackendException("Windlass is writing a reply; wait for it to finish, then unload the model", 409, "server_busy");
+                    sw.Swap(null);
+                    Send(res, 200, new Dictionary<string, object> { { "schema", "windlass.ui.model/1" }, { "state", StateName() }, { "path", null }, { "id", null } });
+                }
+                catch (BackendException e) { Error(res, e.Status, e.Message, e.Kind); }
+                return;
+            }
             if (path == "/api/shutdown" && method == "POST")
             {
                 Send(res, 200, new Dictionary<string, object> { { "stopping", true } });
@@ -477,7 +517,13 @@ namespace Windlass
             st["version"] = _s.Version;
             st["state"] = StateName();
             st["loadError"] = _backend.LoadError;
-            st["model"] = new Dictionary<string, object> { { "id", _backend.ModelId }, { "contextLength", _backend.State == BackendState.Ready ? (object)_backend.ContextLength : null } };
+            SwitchableBackend sw = _backend as SwitchableBackend;
+            Dictionary<string, object> model = new Dictionary<string, object>();
+            model["id"] = _backend.State == BackendState.Idle ? null : _backend.ModelId;
+            model["path"] = sw != null ? sw.ModelPath : null;
+            model["contextLength"] = _backend.State == BackendState.Ready ? (object)_backend.ContextLength : null;
+            st["model"] = model;
+            st["canSwap"] = sw != null;
             st["busy"] = _sched.Busy;
             st["queued"] = _sched.Waiting;
             st["queueMax"] = _s.MaxQueue;
@@ -502,6 +548,7 @@ namespace Windlass
             {
                 case BackendState.Ready: return "ready";
                 case BackendState.Error: return "error";
+                case BackendState.Idle: return "idle";
                 default: return "loading";
             }
         }
@@ -634,6 +681,12 @@ namespace Windlass
             HttpListenerResponse res = ctx.Response;
             string text;
             using (StreamReader r = new StreamReader(ctx.Request.InputStream, new UTF8Encoding(false))) text = r.ReadToEnd();
+            if (_backend.State == BackendState.Idle)
+            {
+                res.AddHeader("Retry-After", "30");
+                Error(res, 503, "no model is loaded; load one in the Windlass UI or start it with --model", "no_model");
+                return;
+            }
             object parsed;
             try { parsed = Json.Parse(text); }
             catch (Exception) { Error(res, 400, "request body is not valid JSON", "invalid_request_error"); return; }

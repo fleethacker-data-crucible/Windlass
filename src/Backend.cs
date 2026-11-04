@@ -31,7 +31,7 @@ namespace Windlass
         public GenerationResult(string finish, int prompt, int completion) { FinishReason = finish; PromptTokens = prompt; CompletionTokens = completion; }
     }
 
-    public enum BackendState { Loading, Ready, Error }
+    public enum BackendState { Idle, Loading, Ready, Error }   // Idle: no model loaded (serve without --model, or after an unload)
 
     public abstract class Backend : IDisposable
     {

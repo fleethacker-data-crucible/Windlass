@@ -100,6 +100,12 @@ namespace Windlass.Tests
                 Add(tests, "ui: /api/logs returns new lines after a cursor, bounded", UiLogs);
                 Add(tests, "ui: heartbeats own the server only when started with --open (fake clock, beacon token in body)", UiHeartbeatOnlyOwnsAnOpenedServer);
                 Add(tests, "ui: /api/shutdown needs the token", UiShutdown);
+                Add(tests, "model swap: SwitchableBackend loads, swaps, fails, unloads and never swaps mid-reply", SwitchableLifecycle);
+                Add(tests, "model swap: /api/models lists folders and .gguf files only, refuses network paths", ApiModelBrowser);
+                Add(tests, "model swap: /api/model loads and swaps, 409 while a reply runs, 503 while loading, idle everywhere", ApiModelSwap);
+                Add(tests, "model swap: two real tiny models load and swap through the engine, and the old file is released", ApiRealModelSwap);
+                Add(tests, "model swap: a model that fails to load shows why and another can follow", ApiModelFailureIsShown);
+                Add(tests, "model swap: serve needs --model when there is no UI to choose one", ServeNeedsAModelWithoutUi);
                 MoeTests.Register(tests);
                 ArchTests.Register(tests);
                 Add(tests, "batch: ForwardBatch gives the logits of separate runs, at different lengths", BatchForwardMatchesSingle);

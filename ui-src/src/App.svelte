@@ -14,7 +14,7 @@
 
   $effect(() => {
     const m = session.status?.state;
-    document.title = session.phase === 'ready' ? `Windlass · ${m === 'ready' ? 'Ready' : m === 'loading' ? 'Loading' : 'Error'}` : 'Windlass';
+    document.title = session.phase === 'ready' ? `Windlass · ${m === 'ready' ? 'Ready' : m === 'loading' ? 'Loading' : m === 'idle' ? 'No model' : 'Error'}` : 'Windlass';
   });
 </script>
 

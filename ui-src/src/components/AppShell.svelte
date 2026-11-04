@@ -5,6 +5,7 @@
   import Sidebar from './Sidebar.svelte';
   import StatusBar from './StatusBar.svelte';
   import HelpDialog from './HelpDialog.svelte';
+  import ModelPicker from './ModelPicker.svelte';
   import Overview from '$views/Overview.svelte';
   import Chat from '$views/Chat.svelte';
   import Playbook from '$views/Playbook.svelte';
@@ -66,3 +67,4 @@
   <StatusBar />
 </div>
 <HelpDialog bind:open={help} />
+<ModelPicker />

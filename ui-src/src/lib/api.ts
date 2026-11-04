@@ -1,5 +1,5 @@
 // The browser side of the Windlass API. Same origin only: the page is served by the server it talks to.
-import type { ChatMessage, LogLine, PlaybookDoc, Status } from './types';
+import type { ChatMessage, LogLine, ModelListing, PlaybookDoc, Status } from './types';
 import { SseParser } from './sse';
 
 export class ApiError extends Error {
@@ -48,6 +48,11 @@ export async function openSession(apiKey = ''): Promise<{ token: string; apiKeyR
 export const getStatus = () => call<Status>('/api/status');
 export const getPlaybook = () => call<{ playbook: PlaybookDoc | null }>('/api/playbook').then((r) => r.playbook);
 export const getLogs = (after: number) => call<{ lines: LogLine[]; last: number }>(`/api/logs?after=${after}`);
+export const listModels = (dir: string | null) => call<ModelListing>(`/api/models${dir ? `?dir=${encodeURIComponent(dir)}` : ''}`);
+/** POST /api/model: 202 once the load has started (watch the status); 409 while a reply is running or a model is loading. */
+export const loadModel = (path: string) =>
+  call<{ state: string; path: string; id: string }>('/api/model', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path }) });
+export const unloadModel = () => call<{ state: string }>('/api/model/unload', { method: 'POST' });
 export const shutdown = () => call<{ stopping: boolean }>('/api/shutdown', { method: 'POST' });
 
 export interface ChatParams {

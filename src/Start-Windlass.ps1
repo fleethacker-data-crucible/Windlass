@@ -2,7 +2,7 @@
 # Started by Launch-Windlass.bat:
 #   powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File src\Start-Windlass.ps1 serve --model <file.gguf> [options]
 #   ... -File src\Start-Windlass.ps1 check      locality checks and compile only, then exit
-#   ... -File src\Start-Windlass.ps1            (no arguments, e.g. a double-click) asks for a model file, then serves it with --open
+#   ... -File src\Start-Windlass.ps1            (no arguments, e.g. a double-click) is serve --open: the UI opens and loads the model you pick
 # serve --open also opens the browser UI once the server answers; this script does that, the engine never starts a process.
 # Runs the locality checks, picks a port in Windlass's block (8777-8779, policy exclusive, edge-ops PORTS.md),
 # compiles src\*.cs in memory with Add-Type (C# 5, .NET Framework 4.8, no references beyond the BCL) and calls
@@ -27,32 +27,6 @@ New-Item -ItemType Directory -Force $env:TEMP | Out-Null
 $version = ([string](Get-Content -LiteralPath (Join-Path $root 'VERSION') -TotalCount 1 -ErrorAction SilentlyContinue)).Trim()
 if (-not $version) { $version = '0.0.0' }
 $cliArgs = @($args | ForEach-Object { [string]$_ })
-
-# Ask for a model file with the Windows open-file dialog. Returns the path, or $null when cancelled or no dialog can be shown.
-function Select-ModelFile {
-    try {
-        Add-Type -AssemblyName System.Windows.Forms
-        $owner = New-Object System.Windows.Forms.Form
-        $owner.TopMost = $true
-        try {
-            $dlg = New-Object System.Windows.Forms.OpenFileDialog
-            $dlg.Title = 'Choose a GGUF model for Windlass'
-            $dlg.Filter = 'GGUF models (*.gguf)|*.gguf|All files (*.*)|*.*'
-            $dlg.CheckFileExists = $true
-            $memory = Join-Path $root 'playbooks\last-model.txt'
-            if (Test-Path -LiteralPath $memory) {
-                $last = ([string](Get-Content -LiteralPath $memory -TotalCount 1)).Trim()
-                if ($last -and (Test-Path -LiteralPath (Split-Path -Parent $last))) { $dlg.InitialDirectory = Split-Path -Parent $last }
-            }
-            if ($dlg.ShowDialog($owner) -ne [System.Windows.Forms.DialogResult]::OK) { return $null }
-            try {
-                New-Item -ItemType Directory -Force (Split-Path -Parent $memory) | Out-Null
-                Set-Content -LiteralPath $memory -Value $dlg.FileName -Encoding ASCII
-            } catch { Write-Verbose "Could not remember the model folder: $($_.Exception.Message)" }
-            return $dlg.FileName
-        } finally { $owner.Dispose() }
-    } catch { return $null }
-}
 
 # Opens the browser at $Url once the server there answers /__fleethacker/id. Runs in this process on its own thread, so it
 # works while the engine blocks the main one; gives up after two minutes.
@@ -79,12 +53,8 @@ function Start-BrowserWhenReady([string]$Url) {
     [void]$ps.BeginInvoke()
 }
 
-# A double-click passes no arguments: pick a model, then serve it with the browser UI.
-if ($cliArgs.Count -eq 0 -and [Environment]::UserInteractive) {
-    $picked = Select-ModelFile
-    if ($picked) { $cliArgs = @('serve', '--model', $picked, '--open') }
-    else { Write-Host 'No model chosen. Run Launch-Windlass.bat help for the commands, or choose a .gguf file to open the UI.' }
-}
+# A double-click passes no arguments: serve with the browser UI, which asks which model to load.
+if ($cliArgs.Count -eq 0 -and [Environment]::UserInteractive) { $cliArgs = @('serve', '--open') }
 $command = if ($cliArgs.Count -gt 0) { $cliArgs[0] } else { '' }
 
 # Locality checks: Windlass makes no outgoing connections and starts no processes. Only Server.cs may use

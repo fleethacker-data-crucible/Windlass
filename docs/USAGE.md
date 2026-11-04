@@ -3,7 +3,7 @@
 ## Commands
 
 ```bat
-Launch-Windlass.bat                                                    :: choose a .gguf in a dialog; serves it and opens the UI
+Launch-Windlass.bat                                                    :: serve --open with no model: pick one in the UI
 Launch-Windlass.bat serve --model D:\models\model.gguf                 :: the API on http://127.0.0.1:8777/v1 (the UI is at /)
 Launch-Windlass.bat serve --model D:\models\model.gguf --open          :: the same, and opens the browser UI (docs/UI.md)
 Launch-Windlass.bat info  --model D:\models\model.gguf                 :: shape, file sizes, RAM per layer, KV cache per token
@@ -93,6 +93,8 @@ under a streamed 70B model, where every token costs a full read of the file, tha
 - **Queue.** `--max-queue` counts requests waiting beyond the N that run.
 
 ## Options
+
+`--model` is optional for `serve`: without it Windlass starts empty and the browser UI loads (and later swaps) the model ([UI.md](UI.md#loading-and-swapping-a-model)).
 
 The browser UI ([UI.md](UI.md)): `--open` opens it and lets its tab own the server (closing the tab stops Windlass, never mid-reply; add `--no-auto-stop` to keep serving), `--no-ui` serves the API only.
 

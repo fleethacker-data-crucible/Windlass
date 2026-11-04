@@ -13,8 +13,8 @@ the 240 px sidebar, 56 px header and 28 px status bar, Lucide icons, WCAG 2.2 AA
 ## Starting it
 
 ```bat
-Launch-Windlass.bat                                         :: asks for a .gguf file, then serves it and opens the UI
-Launch-Windlass.bat serve --model D:\models\model.gguf --open   :: the same with the model on the command line
+Launch-Windlass.bat                                         :: serve --open: the UI opens and you pick the model there
+Launch-Windlass.bat serve --model D:\models\model.gguf --open   :: the same with a model loaded at start
 Launch-Windlass.bat serve --model D:\models\model.gguf          :: the API, as before; the page is at / but nothing opens
 ```
 
@@ -26,18 +26,41 @@ Launch-Windlass.bat serve --model D:\models\model.gguf          :: the API, as b
   Fairlead or a script is using alone.
 - **`--no-ui`** serves the API only. A folder `ui\dist` that is missing or has no `index.html` does the same, with a
   warning in the log.
-- **A model is chosen at start.** The page cannot load or swap a model yet (the engine loads one at start). The file
-  dialog of the no-argument launch remembers its folder in `playbooks\last-model.txt`.
+- **`--model` is optional.** Without it Windlass starts with no model (state *idle*) and the page loads one. With it, that
+  model loads at start, as before, and the page can swap it later. A bad `--model` file still stops the start with its message.
+- **No model and `--no-ui`** is an error: there would be nowhere to choose one.
 
 ## Pages
 
 | Page | What it shows | The command or route behind it |
 | --- | --- | --- |
-| **Overview** | Model state (loading, ready, failed and why), architecture, quant, layers, size, context; seconds per token both ways, per prompt token, what limits it; perplexity and context recall; queue and batch; the base URL and the Fairlead steps | `GET /api/status` (the `windlass` object is the same as `GET /v1/models`), `playbook probe`, `playbook eval`, `playbook fidelity` |
+| **Overview** | Model state (no model, loading, ready, failed and why), **Load a model / Change model / Unload**, architecture, quant, layers, size, context; seconds per token both ways, per prompt token, what limits it; perplexity and context recall; queue and batch; the base URL and the Fairlead steps | `GET /api/status` (the `windlass` object is the same as `GET /v1/models`), `GET /api/models`, `POST /api/model`, `POST /api/model/unload`, `playbook probe`, `playbook eval`, `playbook fidelity` |
 | **Chat** | A conversation with the model, streamed, with Stop, a system prompt, max tokens, temperature and seed; while it waits it shows `accepted`, the keepalives and the time, and afterwards the first-token time and token counts | `POST /v1/chat/completions`, `run` |
 | **Playbook** | The settings in use and why, this computer, the probe's measurements, what real replies taught it | `GET /api/playbook`, `playbook show` |
 | **Log** | The last 500 lines of the server log (ids, token counts and timings; never prompts or replies), filterable, with Follow and Copy | `GET /api/logs`, the file in `logs\` |
 | **Settings** | Theme, the server's settings as started (read-only), End session | `POST /api/shutdown`, `Stop-Windlass.ps1` |
+
+## Loading and swapping a model
+
+![The model picker: a path field and the folders and .gguf files of D:\models with their sizes](screenshots/ui-model-picker-night.png)
+
+*Load a model* (or *Change model*) opens a picker: paste a path, or browse. It starts at the drives and the models you loaded
+recently, or in the folder of the loaded model; folders and `.gguf` files are listed with their sizes, and a file click fills the
+path. *Load* then:
+
+1. Refuses (409) while a reply is running or queued, or while another model is loading. Nothing changes; stop the reply in
+   Chat, or wait for it. A swap never interrupts a reply.
+2. Closes the current model first, so two big models never share memory, and reads the new one's header on its own thread.
+   Meanwhile the state is *loading* and requests get a 503 `model_loading` (clients such as Fairlead fail over on it).
+3. Applies the options `serve` was started with (threads, `--cache-gb`, `--batch`, `--int-dot`, ...) to the new model, with
+   *that model's* playbook (`playbooks\*.json` is per computer and model). `--model-id` applies to the model given at start only;
+   later models are named after their file. The batch size cannot change without a restart.
+4. If it fails (not a GGUF file, not enough RAM for `--batch`, an unsupported architecture), the page shows the engine's reason,
+   the state is *failed*, and another model can be loaded straight away. *Unload* frees the memory and goes back to idle.
+
+Loaded models are remembered in `playbooks\recent-models.txt` (the last eight, newest first, per computer, not in git).
+Browsing reads names and sizes only, never file contents, and refuses network paths (`\\server\share`): Windlass makes no
+outgoing connections.
 
 Measuring (`probe`, `eval`, `fidelity`) stays a command: each reads the whole model from disk and takes minutes to hours. A
 value that was never measured shows as **—** with the command that produces it, never as an estimate.
@@ -58,6 +81,7 @@ closes a dialog.
   asks for the key once and keeps it for the tab (`sessionStorage`), never in `localStorage`. The page's files carry no
   secret, so they load without the key. The token opens `/api/` only, never `/v1`. The page-close beacon cannot set
   headers, so `/api/heartbeat` also accepts the token in its JSON body, on that one route.
+- The page can read folder and file names on this computer through `GET /api/models`, so that route needs the session token like the rest (and so the API key when one is set).
 - Browser storage keys start with `windlass-`: `windlass-theme`, `windlass-sidebar`, `windlass-max-tokens`. Chats are kept in
   the page's memory only.
 

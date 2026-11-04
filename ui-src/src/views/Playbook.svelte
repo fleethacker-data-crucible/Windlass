@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { getPlaybook } from '$lib/api';
+  import { session } from '$lib/session.svelte';
   import { toast } from '$lib/toast.svelte';
   import { copyText } from '$lib/copy';
   import { formatDuration, formatNumber, formatPercent, formatSecPerToken, formatTime } from '$lib/format';
@@ -25,6 +26,15 @@
     }
   }
   onMount(load);
+  // A different model has a different playbook: read it again when the model changes.
+  let seen = session.status?.model.path;
+  $effect(() => {
+    const now = session.status?.model.path;
+    if (now !== seen) {
+      seen = now;
+      void load();
+    }
+  });
   const acceptRate = $derived(pb && pb.observed.guessed > 0 ? pb.observed.accepted / pb.observed.guessed : null);
 </script>
 

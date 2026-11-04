@@ -1,7 +1,7 @@
 <script lang="ts">
   // A modal on the native <dialog>: the browser traps focus, Esc closes, the page behind is inert. 14 px radius (Fleet UI).
   import type { Snippet } from 'svelte';
-  let { open = $bindable(false), title, description = '', onclose, children, footer }: { open?: boolean; title: string; description?: string; onclose?: () => void; children?: Snippet; footer?: Snippet } = $props();
+  let { open = $bindable(false), title, description = '', wide = false, onclose, children, footer }: { open?: boolean; title: string; description?: string; wide?: boolean; onclose?: () => void; children?: Snippet; footer?: Snippet } = $props();
   let el: HTMLDialogElement | undefined = $state();
 
   $effect(() => {
@@ -11,7 +11,7 @@
   });
 </script>
 
-<dialog bind:this={el} class="fl-dialog m-auto" aria-labelledby="modal-title" onclose={() => { open = false; onclose?.(); }} onclick={(e) => { if (e.target === el) el?.close(); }}>
+<dialog bind:this={el} class="fl-dialog m-auto {wide ? 'wide' : ''}" aria-labelledby="modal-title" onclose={() => { open = false; onclose?.(); }} onclick={(e) => { if (e.target === el) el?.close(); }}>
   <div class="p-5">
     <h2 id="modal-title" class="text-[16px] font-semibold">{title}</h2>
     {#if description}<p class="mt-1.5 text-[13px] text-muted-foreground">{description}</p>{/if}

@@ -24,7 +24,7 @@ A *windlass* is the heavy winch at a ship's bow that hauls the anchor chain in l
 
 1. Download or clone the folder, then **Unblock** it if it came as a zip. No admin rights, installs or network access needed.
 2. Put a GGUF model on your fastest drive, for example `D:\models\Llama-3.3-70B-Instruct-Q4_K_M.gguf`. Windlass reads files only; it never downloads anything.
-3. Double-click `Launch-Windlass.bat` and choose the file, or in a console:
+3. Double-click `Launch-Windlass.bat` (the UI opens and you choose the model there), or in a console:
 
    ```bat
    Launch-Windlass.bat serve --model D:\models\Llama-3.3-70B-Instruct-Q4_K_M.gguf --open
@@ -43,7 +43,7 @@ Windlass sets itself up for the computer it runs on (free RAM, cores, battery): 
 - **Llama 2/3, Mistral, Qwen2/2.5 and dense Qwen3** GGUF files in the usual quantizations (`Q8_0` to `Q2_K`) and in the I-quants (`IQ4_NL`, `IQ4_XS`, `IQ3_XXS`, `IQ3_S`, `IQ2_XXS`, `IQ2_XS`, `IQ2_S`, `IQ1_S`, `IQ1_M`; reference ports of llama.cpp's decoders, not yet logit-checked against llama.cpp, see [docs/USAGE.md](docs/USAGE.md#models)), with built-in tokenizers and chat templates.
 - **Granite 3 dense and OLMo 2** (`granite`, `olmo2`): the forward pass is tested against an independent reference, not against llama.cpp, and their chat templates and pre-tokenizers are not built in yet ([docs/USAGE.md](docs/USAGE.md#models)).
 - **Mixture-of-experts models** (Mixtral-style `llama`, `qwen2moe`, `qwen3moe`): only the chosen experts compute, but a layer still streams every expert. Tested against an independent reference on tiny models; not yet logit-checked against llama.cpp on a real MoE file.
-- **A browser UI** (Svelte 5 on the Fleet shell, Night watch and Chart room): model state, measured speed and quality, a streaming chat with Stop, the playbook and why it chose what it did, the log, and End session ([docs/UI.md](docs/UI.md)).
+- **A browser UI** (Svelte 5 on the Fleet shell, Night watch and Chart room): load, swap and unload a model, model state, measured speed and quality, a streaming chat with Stop, the playbook and why it chose what it did, the log, and End session ([docs/UI.md](docs/UI.md)).
 - **OpenAI-compatible API**: chat completions with streaming, usage, keepalives during long layer passes, a FIFO queue and cancel on disconnect ([docs/API.md](docs/API.md)).
 - **Publishes what it measured.** `GET /v1/models` carries a `windlass` object with seconds per token and per prompt token (predicted and observed), the limiting resource, perplexity (`playbook eval`) and a context-fidelity score (`playbook fidelity`), `null` where never measured, so a router can choose without guessing ([docs/API.md](docs/API.md#measured-numbers-in-v1models), [docs/SPEED-QUALITY.md](docs/SPEED-QUALITY.md)).
 - **Optional batching** (`serve --batch N`): up to N requests generate together, one pass over the layers per step for all of them, with the same replies as one at a time. Off by default; each slot adds a KV cache of RAM; the throughput gain is unmeasured ([docs/USAGE.md](docs/USAGE.md#batching)).

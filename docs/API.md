@@ -56,6 +56,12 @@ runs) and never waits for a running generation, so it answers while a reply is b
 
 A stub server (`--stub`) reports `null` for everything the model file or a measurement would supply.
 
+## No model loaded
+
+`serve` without `--model` (or after an unload) is *idle*: `GET /health` says `"status": "idle"`, `GET /v1/models` lists nothing,
+`GET /v1/models/{id}` is 404 and a chat request is 503 `no_model` with `Retry-After: 30`. Loading a model from the page (below)
+moves it through `loading` (503 `model_loading`) to `ready`, or to `error` (503 `model_load_failed`, with the reason).
+
 ## The UI's routes (`/api/`)
 
 For the page ([UI.md](UI.md)); a script may use them too. `POST /api/session` (with `Authorization: Bearer <key>` when
@@ -65,10 +71,13 @@ but this server's own.
 
 | Route | Answer |
 | --- | --- |
-| `GET /api/status` | `windlass.ui.status/1`: `state` (`loading`, `ready`, `error`), `loadError`, `model`, `busy`, `queued`, `queueMax`, `address`, `apiKeyRequired`, `batch`, `stub`, `startedAt`, `uptimeSeconds`, `autoStop` (`enabled`, `ownsLife`, `armed`) and `windlass`, the same object `/v1/models` carries |
+| `GET /api/status` | `windlass.ui.status/1`: `state` (`idle`, `loading`, `ready`, `error`), `loadError`, `model` (`id` and `path`, null while idle; `contextLength`), `canSwap` (false for `--stub`), `busy`, `queued`, `queueMax`, `address`, `apiKeyRequired`, `batch`, `stub`, `startedAt`, `uptimeSeconds`, `autoStop` (`enabled`, `ownsLife`, `armed`) and `windlass`, the same object `/v1/models` carries |
 | `GET /api/playbook` | `windlass.ui.playbook/1`: `playbook` is the `windlass.playbook/1` document in use, or `null` (stub, or `--no-playbook`) |
 | `GET /api/logs?after=N` | `windlass.ui.logs/1`: `lines` (`seq`, `text`) written after sequence number N, `last`; the last 500 lines are kept in memory |
 | `POST /api/heartbeat` | The Presence rule for the page. Token in the header, or in the body's `token` on this route (a page-close beacon cannot set headers). Body `{"tab": ..., "leaving": bool}`. Answers `{"ok": true, "ownsLife": ..., "autoStop": ...}`. Only a server started with `serve --open` counts it; otherwise it is acknowledged and ignored |
+| `GET /api/models?dir=<folder>` | `windlass.ui.models/1`: the folders and `.gguf` files in `dir` (`entries` with `name`, `path`, `type` `dir`/`gguf`, `bytes`; `parent`; `truncated` past 1000), or with no `dir` the drives, plus `recent` (the last eight models loaded, `exists` checked). Names and sizes only; network paths are refused (400) |
+| `POST /api/model` | Body `{"path": "<file.gguf>"}`. Loads that model, replacing the loaded one: 202 `windlass.ui.model/1` (`state`, `path`, `id`) once the load has started; watch `GET /api/status`. 400 for a path that is not a local `.gguf`, 404 when it does not exist, 409 `server_busy` while a reply is running or queued or a model is loading |
+| `POST /api/model/unload` | Frees the model and goes idle (409 while a reply is running). |
 | `POST /api/shutdown` | Stops Windlass, like `POST /__fleethacker/shutdown`, for the page's End session |
 
 ## Errors

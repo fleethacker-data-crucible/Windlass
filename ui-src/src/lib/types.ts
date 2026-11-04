@@ -23,14 +23,16 @@ export interface WindlassFacts {
   queue: { length: number | null; max: number | null };
 }
 
-export type ModelState = 'loading' | 'ready' | 'error';
+export type ModelState = 'idle' | 'loading' | 'ready' | 'error';
 
 export interface Status {
   schema: 'windlass.ui.status/1';
   version: string;
   state: ModelState;
   loadError: string | null;
-  model: { id: string; contextLength: number | null };
+  /** id and path are null while no model is loaded. canSwap is false for a stub server. */
+  model: { id: string | null; path: string | null; contextLength: number | null };
+  canSwap: boolean;
   busy: boolean;
   queued: number;
   queueMax: number;
@@ -65,4 +67,23 @@ export interface LogLine {
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
+}
+
+export interface ModelEntry {
+  name: string;
+  path: string;
+  type: 'dir' | 'gguf';
+  bytes: number | null;
+  /** Recent models only: false when the file is gone. */
+  exists?: boolean;
+}
+
+export interface ModelListing {
+  schema: string;
+  /** null at the top: the drives and the recent models. */
+  dir: string | null;
+  parent: string | null;
+  entries: ModelEntry[];
+  truncated: boolean;
+  recent: ModelEntry[];
 }

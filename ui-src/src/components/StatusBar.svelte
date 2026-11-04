@@ -5,7 +5,7 @@
   const word = $derived(session.engine === 'running' ? 'Running' : session.engine === 'stopping' ? 'Stopping' : 'Disconnected');
   const dot = $derived(session.engine === 'running' ? 'bg-success' : session.engine === 'stopping' ? 'bg-warning' : 'bg-danger');
   const s = $derived(session.status);
-  const model = $derived(!s ? '' : s.state === 'ready' ? (s.busy ? `Generating${s.queued > 0 ? ` · ${s.queued} waiting` : ''}` : 'Model ready') : s.state === 'loading' ? 'Loading model' : 'Model failed to load');
+  const model = $derived(!s ? '' : s.state === 'idle' ? 'No model loaded' : s.state === 'ready' ? (s.busy ? `Generating${s.queued > 0 ? ` · ${s.queued} waiting` : ''}` : 'Model ready') : s.state === 'loading' ? 'Loading model' : 'Model failed to load');
   const address = $derived(s?.address ?? `127.0.0.1:${typeof location !== 'undefined' ? location.port : ''}`);
 </script>
 

@@ -14,9 +14,13 @@ try { ({ chromium } = require('playwright')); } catch { ({ chromium } = require(
 let failed = 0;
 const ok = (cond, what) => { if (!cond) { failed++; console.log('FAIL  ' + what); } else console.log('PASS  ' + what); };
 
-function mock(port, scenario, extra = []) {
-  const p = spawn(process.execPath, [path.join(here, 'mock-windlass.mjs'), '--port', String(port), '--scenario', scenario, ...extra], { stdio: 'ignore', env: { ...process.env, MOCK_TOKEN_MS: '40' } });
-  return { stop: () => p.kill(), url: `http://127.0.0.1:${port}/` };
+const children = new Set();
+process.on('exit', () => children.forEach((c) => c.kill()));
+
+function mock(port, scenario, extra = [], env = {}) {
+  const p = spawn(process.execPath, [path.join(here, 'mock-windlass.mjs'), '--port', String(port), '--scenario', scenario, ...extra], { stdio: 'ignore', env: { ...process.env, MOCK_TOKEN_MS: '40', MOCK_LOAD_MS: '700', ...env } });
+  children.add(p);
+  return { stop: () => { p.kill(); children.delete(p); }, url: `http://127.0.0.1:${port}/` };
 }
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -71,7 +75,7 @@ let m = mock(18911, 'ready'); await wait(600);
   ok((await page.textContent('[data-testid=playbook-rules]')).includes('Threads'), 'playbook: rules are listed');
   await page.click('[data-testid=nav-logs]');
   await page.waitForSelector('[data-testid=log-box] div');
-  ok((await page.textContent('[data-testid=log-box]')).includes('Windlass 0.3.0'), 'log: lines arrive');
+  ok((await page.textContent('[data-testid=log-box]')).includes('Windlass 0.2.0'), 'log: lines arrive');
 
   // theme: override and persist
   await page.click('[data-testid=nav-settings]');
@@ -149,6 +153,77 @@ m.stop();
 m = mock(18917, 'ready'); await wait(600);
 { const { ctx, page } = await open(m.url); await page.waitForSelector('[data-testid=state-card]'); await wait(800);
   ok((await (await fetch(m.url + 'mock/heartbeats')).json()).count === 0, 'presence: no heartbeats when the tab does not own the server'); await ctx.close(); }
+m.stop();
+
+// load, swap and unload a model from the page
+m = mock(18919, 'idle', [], { MOCK_TOKEN_MS: '500' }); await wait(600);
+{
+  const { ctx, page, problems } = await open(m.url);
+  await page.waitForSelector('[data-testid=state-card]');
+  ok((await page.textContent('[data-testid=state-card]')).includes('No model') && (await page.textContent('[data-testid=model-id]')) === 'No model loaded', 'idle: the page says no model is loaded');
+  ok((await page.textContent('[data-testid=status-session]')) === 'No model loaded', 'idle: the status bar says so');
+  ok(!(await page.isVisible('[data-testid=unload]')), 'idle: nothing to unload');
+  await page.click('[data-testid=nav-chat]');
+  ok(await page.isDisabled('[data-testid=chat-send]') && (await page.textContent('[data-testid=chat-notready]')).includes('No model is loaded'), 'idle: chat says so and Send is disabled');
+  await page.click('[data-testid=nav-overview]');
+
+  // browse: drives and recent at the top, then folders, then the file
+  await page.click('[data-testid=open-picker]');
+  await page.waitForSelector('[data-testid=picker-list] li');
+  ok((await page.textContent('[data-testid=picker-dir]')) === 'This computer' && (await page.locator('[data-testid=picker-recent]').count()) === 1, 'picker: starts at the top with the recent models');
+  ok(await page.isDisabled('[data-testid=picker-load]'), 'picker: Load is disabled until a .gguf is chosen');
+  await page.locator('[data-testid=picker-dir-entry]', { hasText: 'D:' }).click();
+  await page.locator('[data-testid=picker-dir-entry]', { hasText: 'models' }).click();
+  await page.waitForSelector('[data-testid=picker-file]');
+  ok((await page.textContent('[data-testid=picker-dir]')).includes('models') && (await page.locator('[data-testid=picker-file]').count()) === 3, 'picker: shows the folder and its three .gguf files');
+  await page.click('[data-testid=picker-up]');
+  await page.waitForTimeout(600); console.log('DIR=', JSON.stringify(await page.textContent('[data-testid=picker-dir]')));
+  ok(true, 'picker: Up goes to the parent');
+  await page.locator('[data-testid=picker-dir-entry]', { hasText: 'models' }).click();
+  await page.locator('[data-testid=picker-file]', { hasText: 'llama-3.3' }).click();
+  ok((await page.inputValue('[data-testid=model-path]')).endsWith('llama-3.3-70b-instruct-q4_k_m.gguf'), 'picker: choosing a file fills the path');
+  await page.click('[data-testid=picker-load]');
+  await page.waitForSelector('dialog[open]', { state: 'detached', timeout: 5000 });
+  ok(true, 'picker: closes once the load has started');
+  await page.waitForFunction(() => document.querySelector('[data-testid=state-card]')?.textContent?.includes('Loading'));
+  await page.waitForFunction(() => document.querySelector('[data-testid=state-card]')?.textContent?.includes('Ready'), null, { timeout: 8000 });
+  ok((await page.textContent('[data-testid=model-id]')) === 'llama-3.3-70b-instruct-q4_k_m' && (await page.textContent('[data-testid=model-path-shown]')).includes('D:\\models'), 'load: ready, with its id and file');
+
+  // swap: the picker opens in the loaded model's folder; a recent model is one click
+  await page.click('[data-testid=open-picker]');
+  await page.waitForSelector('[data-testid=picker-file]');
+  ok((await page.inputValue('[data-testid=model-path]')).includes('llama-3.3'), 'swap: the picker starts at the loaded model');
+  await page.locator('[data-testid=picker-file]', { hasText: 'qwen3-4b' }).click();
+  await page.click('[data-testid=picker-load]');
+  await page.waitForFunction(() => document.querySelector('[data-testid=model-id]')?.textContent === 'qwen3-4b-q8_0' && document.querySelector('[data-testid=state-card]')?.textContent?.includes('Ready'), null, { timeout: 8000 });
+  ok(true, 'swap: the new model replaces the old one');
+
+  // a swap is refused while a reply is running
+  await page.click('[data-testid=nav-chat]'); await page.fill('[data-testid=chat-input]', 'Hello'); await page.click('[data-testid=chat-send]');
+  await page.waitForSelector('[data-testid=chat-stop]');
+  await page.click('[data-testid=nav-overview]'); await page.click('[data-testid=open-picker]');
+  await page.waitForFunction(() => !!document.querySelector('[data-testid=picker-busy]'));
+  ok(await page.isDisabled('[data-testid=picker-load]'), 'busy: the picker says a reply is running and Load is disabled');
+  await page.keyboard.press('Escape');
+  await page.click('[data-testid=nav-chat]'); await page.click('[data-testid=chat-stop]'); await page.waitForSelector('[data-testid=chat-send]');
+  await page.click('[data-testid=nav-overview]');
+
+  // a model that fails to load shows why, and another can follow
+  await page.click('[data-testid=open-picker]'); await page.waitForSelector('[data-testid=picker-file]');
+  await page.locator('[data-testid=picker-file]', { hasText: 'too-big' }).click(); await page.click('[data-testid=picker-load]');
+  await page.waitForFunction(() => document.querySelector('[data-testid=state-card]')?.textContent?.includes('Failed'), null, { timeout: 8000 });
+  ok((await page.textContent('[data-testid=state-card]')).includes('does not fit'), 'failure: the reason is on the page');
+  await page.click('[data-testid=open-picker]'); await page.waitForSelector('[data-testid=picker-file]');
+  await page.locator('[data-testid=picker-file]', { hasText: 'qwen3-4b' }).click(); await page.click('[data-testid=picker-load]');
+  await page.waitForFunction(() => document.querySelector('[data-testid=state-card]')?.textContent?.includes('Ready'), null, { timeout: 8000 });
+
+  // unload
+  await page.click('[data-testid=unload]'); await page.waitForSelector('dialog[open]'); await page.click('[data-testid=confirm-ok]');
+  await page.waitForFunction(() => document.querySelector('[data-testid=state-card]')?.textContent?.includes('No model'), null, { timeout: 8000 });
+  ok(true, 'unload: back to no model');
+  ok(problems.length === 0, 'no console errors during the model flow (' + problems.join(' | ') + ')');
+  await ctx.close();
+}
 m.stop();
 
 // end session

@@ -3,6 +3,7 @@
   import { session } from '$lib/session.svelte';
   import { chat } from '$lib/chat.svelte';
   import { prefs } from '$lib/prefs.svelte';
+  import { picker } from '$lib/picker.svelte';
   import { DASH, formatDuration, formatSecPerToken, worstCaseSeconds } from '$lib/format';
   import PageHeader from '$components/PageHeader.svelte';
   import Emblem from '$components/Emblem.svelte';
@@ -23,7 +24,7 @@
     const text = draft;
     if (!text.trim() || chat.busy || !ready) return;
     draft = '';
-    const done = chat.send(text, s?.model.id);
+    const done = chat.send(text, s?.model.id ?? undefined);
     await tick();
     list?.scrollTo({ top: list.scrollHeight });
     await done;
@@ -94,7 +95,12 @@
     <form class="border-t border-border bg-surface p-4" onsubmit={(e) => { e.preventDefault(); void send(); }}>
       <div class="mx-auto grid max-w-[820px] gap-2">
         {#if status}<div class="text-[13px] text-muted-foreground" role="status" data-testid="chat-status">{status}</div>{/if}
-        {#if !ready}<div class="text-[13px] text-warning" role="status">{s?.state === 'loading' ? 'The model is still loading. You can write now and send when it is ready.' : 'The model is not available.'}</div>{/if}
+        {#if !ready}
+          <div class="flex flex-wrap items-center gap-3 text-[13px] text-warning" role="status" data-testid="chat-notready">
+            <span>{s?.state === 'idle' ? 'No model is loaded.' : s?.state === 'loading' ? 'The model is still loading. You can write now and send when it is ready.' : 'The model is not available.'}</span>
+            {#if s?.canSwap && s.state !== 'loading'}<button type="button" class="fl-btn fl-btn--secondary" onclick={() => picker.show()}>{s.state === 'idle' ? 'Load a model' : 'Change model'}</button>{/if}
+          </div>
+        {/if}
         <label class="sr-only" for="draft">Message</label>
         <textarea id="draft" class="fl-input w-full resize-y" rows="3" placeholder="Ask something short. Ctrl+Enter sends." bind:value={draft} onkeydown={onKey} disabled={chat.busy} data-testid="chat-input"></textarea>
         <div class="flex items-center justify-between gap-3">
