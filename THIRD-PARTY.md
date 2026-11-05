@@ -26,6 +26,9 @@ The UI is built off the workstation from `ui-src`; the compiled files contain th
 
 ## AirLLM
 
-- Project: [AirLLM](https://github.com/lyogavin/airllm) by Gavin Li and contributors, Apache License 2.0
+- Project: [AirLLM](https://github.com/lyogavin/airllm) by Gavin Li and contributors
+- Licence: Apache License 2.0 (full text in [LICENSES/AirLLM-Apache-2.0.txt](LICENSES/AirLLM-Apache-2.0.txt))
 
-Windlass takes the idea of layer-by-layer inference from AirLLM: keep one layer in memory, load each layer just before it runs and free it after, prefetch the next layer while the current one computes, and keep the KV cache across layers. Windlass v0.1 was a Python refactor of AirLLM's code; v0.2 is a new C# implementation over GGUF files and contains no AirLLM code.
+Windlass is derived from and refactored from AirLLM. v0.1 was a Python refactor of AirLLM's layer-streaming design: keep one layer in memory, load each layer just before it runs and free it after, prefetch the next layer while the current one computes, and keep the KV cache across layers. v0.2 is a C# rewrite of that design over GGUF files. The current v0.2 tree ships no AirLLM source.
+
+AirLLM publishes no NOTICE file. This section is the notice for the derived work: AirLLM (https://github.com/lyogavin/airllm), Copyright 2023 Gavin Li and contributors, under the Apache License, Version 2.0.
