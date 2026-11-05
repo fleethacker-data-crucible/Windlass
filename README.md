@@ -61,4 +61,4 @@ Windlass binds loopback only (`127.0.0.1` and `localhost`), checks every request
 
 ## License
 
-MIT. See [LICENSE](LICENSE). Algorithms ported from llama.cpp (MIT) and parts of Phoenix LAI (MIT); the layer-streaming idea comes from AirLLM. See [THIRD-PARTY.md](THIRD-PARTY.md).
+MIT. See [LICENSE](LICENSE). Algorithms ported from llama.cpp (MIT) and parts of Phoenix LAI (MIT). Windlass is derived from and refactored from AirLLM (Apache-2.0). See [THIRD-PARTY.md](THIRD-PARTY.md).
