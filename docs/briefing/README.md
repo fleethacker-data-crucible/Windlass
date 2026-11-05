@@ -15,5 +15,5 @@ Written for sharing with the team; current as of 28 October 2026.
   </picture>
 </p>
 
-The page describes work that is partly still in review: the machine playbook, guess-ahead and the quality score are in
-Windlass PRs #7, #8 and #9.
+The page describes the machine playbook, guess-ahead and the quality score as work then in review; they were merged in
+Windlass PRs #7, #8 and #9 and are in the code now.
