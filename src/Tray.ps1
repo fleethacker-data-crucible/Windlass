@@ -3,6 +3,9 @@
 # (Windlass.TrayHost, src\TrayHost.cs) and this thread runs the Windows message loop. Closing the browser window or tab
 # does not stop the engine or unload the model, because Fairlead and other programs use the local API. "Quit Windlass"
 # on the icon stops the engine and removes the icon. WinForms NotifyIcon only; no extra DLLs, no installer.
+# The icon art comes from the FleetHacker tray kit (src\vendor\fleet-tray, a copy of edge-ops ui-kit/tray), which
+# draws it at the tray's real size for the display scale.
+. (Join-Path $PSScriptRoot 'vendor\fleet-tray\FleetTray.ps1')
 
 # The browser that shows Windlass as an app window (Edge, then Chrome, as the Fleet UI standard does). $null when
 # neither is installed. -Candidates is for tests.
@@ -51,6 +54,13 @@ function Get-WindlassTrayTip {
     return $t
 }
 
+# The icon itself: Windlass's tile from the tray kit at the tray's size. Where Add-Type is blocked the kit falls back to
+# IconPath (assets\brand\tray.ico) at that same size, then to Windows' application icon.
+function Get-WindlassTrayIcon {
+    param([string]$IconPath)
+    return (Get-FleetTrayIcon -App windlass -FallbackPath $IconPath)
+}
+
 # Shows the icon and runs the engine until it stops. Returns the engine's exit code.
 function Start-WindlassTray {
     param(
@@ -70,11 +80,7 @@ function Start-WindlassTray {
     $script:trayQuitting = $false
 
     $icon = New-Object System.Windows.Forms.NotifyIcon
-    if ($IconPath -and (Test-Path -LiteralPath $IconPath)) {
-        $icon.Icon = New-Object System.Drawing.Icon($IconPath, [System.Windows.Forms.SystemInformation]::SmallIconSize)
-    } else {
-        $icon.Icon = [System.Drawing.SystemIcons]::Application
-    }
+    $icon.Icon = Get-WindlassTrayIcon -IconPath $IconPath
     $icon.Text = Get-WindlassTrayTip 'starting'
 
     $menu = New-Object System.Windows.Forms.ContextMenuStrip
