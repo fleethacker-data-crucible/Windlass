@@ -105,7 +105,7 @@ Describe 'Tray.ps1' {
         foreach ($f in @('FleetTray.ps1', 'FleetTrayArt.cs')) {
             @([IO.File]::ReadAllBytes((Join-Path $kit $f)) | Where-Object { $_ -gt 127 }).Count | Should -Be 0 -Because $f
         }
-        Get-Content -LiteralPath (Join-Path $kit 'README.md') -Raw | Should -Match 'ui-kit/tray v1\.0\.0, commit c2172f7'
+        Get-Content -LiteralPath (Join-Path $kit 'README.md') -Raw | Should -Match 'ui-kit/tray v1\.0\.0, commit 2f90369'
         # Start-Windlass.ps1 and Run-Tests.ps1 compile src\*.cs (not recursive) with the BCL only; the kit needs System.Drawing.
         @(Get-ChildItem -LiteralPath $script:srcDir -Filter *.cs -File | Where-Object { $_.Name -eq 'FleetTrayArt.cs' }) | Should -BeNullOrEmpty
     }
