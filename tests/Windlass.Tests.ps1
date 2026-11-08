@@ -84,8 +84,30 @@ Describe 'Tray.ps1' {
         $b = [IO.File]::ReadAllBytes($ico)
         [BitConverter]::ToUInt16($b, 2) | Should -Be 1
         $n = [BitConverter]::ToUInt16($b, 4)
-        $sizes = @(for ($i = 0; $i -lt $n; $i++) { $b[6 + 16 * $i] })
-        $sizes | Should -Be @(16, 20, 24, 32)
+        $sizes = @(for ($i = 0; $i -lt $n; $i++) { [int]$b[6 + 16 * $i] })
+        foreach ($s in @(16, 20, 24, 32)) { $sizes | Should -Contain $s }
+    }
+    It 'asks the FleetHacker tray kit for the Windlass icon, with tray.ico as the fallback' {
+        Mock Get-FleetTrayIcon { $null }
+        $ico = Join-Path (Split-Path -Parent $PSScriptRoot) 'assets\brand\tray.ico'
+        [void](Get-WindlassTrayIcon -IconPath $ico)
+        Should -Invoke Get-FleetTrayIcon -Times 1 -Exactly -ParameterFilter { $App -eq 'windlass' -and $FallbackPath -eq $ico }
+        $body = (Get-Command Start-WindlassTray).Definition
+        $body | Should -Match 'Get-WindlassTrayIcon -IconPath \$IconPath'
+        $body | Should -Not -Match 'SmallIconSize'
+    }
+    It 'draws the icon at the tray size' {
+        $i = Get-WindlassTrayIcon -IconPath (Join-Path (Split-Path -Parent $PSScriptRoot) 'assets\brand\tray.ico')
+        try { $i.Width | Should -Be (Get-FleetTraySize) } finally { $i.Dispose() }
+    }
+    It 'keeps the vendored kit ASCII, recorded and out of the engine build' {
+        $kit = Join-Path $script:srcDir 'vendor\fleet-tray'
+        foreach ($f in @('FleetTray.ps1', 'FleetTrayArt.cs')) {
+            @([IO.File]::ReadAllBytes((Join-Path $kit $f)) | Where-Object { $_ -gt 127 }).Count | Should -Be 0 -Because $f
+        }
+        Get-Content -LiteralPath (Join-Path $kit 'README.md') -Raw | Should -Match 'ui-kit/tray v1\.0\.0, commit 6498eaa'
+        # Start-Windlass.ps1 and Run-Tests.ps1 compile src\*.cs (not recursive) with the BCL only; the kit needs System.Drawing.
+        @(Get-ChildItem -LiteralPath $script:srcDir -Filter *.cs -File | Where-Object { $_.Name -eq 'FleetTrayArt.cs' }) | Should -BeNullOrEmpty
     }
     It 'is wired into Start-Windlass.ps1 and the C# stays free of banned calls' {
         $start = Get-Content -LiteralPath (Join-Path $script:srcDir 'Start-Windlass.ps1') -Raw
