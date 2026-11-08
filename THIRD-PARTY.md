@@ -19,7 +19,7 @@ Taken from it: `src/Half.cs` and `src/Json.cs` (unchanged apart from the namespa
 ## FleetHacker edge-ops
 
 - `src/FleetPort.psm1` is a copy of [tools/fleet-port/FleetPort.psm1](https://github.com/fleethacker-data-crucible/edge-ops/tree/main/tools/fleet-port) (MIT), the suite's port-block and self-detection helper. `PSScriptAnalyzerSettings.psd1` and `.gitattributes` come from edge-ops too.
-- `src/vendor/fleet-tray/` (`FleetTrayArt.cs`, `FleetTray.ps1`) is an unchanged copy of [ui-kit/tray](https://github.com/fleethacker-data-crucible/edge-ops/tree/main/ui-kit/tray) v1.0.0, commit 6498eaa (MIT): the tray icon drawn at the notification area's size. It is compiled on its own by `src/Tray.ps1`, not with the engine.
+- `src/vendor/fleet-tray/` (`FleetTrayArt.cs`, `FleetTray.ps1`) is an unchanged copy of [ui-kit/tray](https://github.com/fleethacker-data-crucible/edge-ops/tree/main/ui-kit/tray) v1.0.0, commit c2172f7 (MIT): the tray icon drawn at the notification area's size. It is compiled on its own by `src/Tray.ps1`, not with the engine.
 
 ## Browser UI (compiled into `ui\dist`)
 
