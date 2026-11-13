@@ -13,12 +13,12 @@ Open code-scanning and Dependabot alerts reviewed for this sprint. Nothing here 
 | code-scanning 2 | `cs/user-controlled-bypass` | `src/Server.cs:339` | accept: false positive | `GET` is required before `/v1/models` calls `Authorized` and returns models. Another method is 405. Recommend dismissal: False positive. |
 | code-scanning 1 | `js/clear-text-storage-of-sensitive-data` | `ui-src/src/lib/prefs.svelte.ts` | fixed | The API key is kept in memory for the page only. It is not written to `sessionStorage` or `localStorage`; a reload asks for it again. A leftover `windlass-api-key` entry is removed and never read. |
 | dependabot 7 | deepmerge (npm) `GHSA-gcqx-w48m-w2h4` | `ui-src/package-lock.json` | accept: won't fix within stack | Dev-only transitive of `@sveltejs/vite-plugin-svelte` (not in `ui/dist`). No patched release exists (latest 4.3.1). A downgrade to 4.1.2 is outside the advisory range and would revert the 4.2.0 enumerable-property change, so it is not a safe override. Recommend dismissal: Risk is tolerable to this project. |
-| dependabot 6 | vite (npm) `GHSA-9jrq-w75r-8gcw` | `ui-src/package-lock.json` | fixed | Direct devDependency bumped from 8.3.0 to 8.3.3, the first patched release. |
-| dependabot 5 | vite (npm) `GHSA-rq7h-c2jc-7f22` | `ui-src/package-lock.json` | fixed | Same Vite 8.3.3 bump. |
-| dependabot 4 | vite (npm) `GHSA-vfpm-58rq-9qcg` | `ui-src/package-lock.json` | fixed | Same Vite 8.3.3 bump. |
-| dependabot 3 | vite (npm) `GHSA-r825-w8mm-5pxw` | `ui-src/package-lock.json` | fixed | Same Vite 8.3.3 bump. |
-| dependabot 2 | vite (npm) `GHSA-587h-7wmj-h5pm` | `ui-src/package-lock.json` | fixed | Same Vite 8.3.3 bump. |
-| dependabot 1 | vite (npm) `GHSA-698v-4r3x-3vcv` | `ui-src/package-lock.json` | fixed | Same Vite 8.3.3 bump. |
+| dependabot 6 | vite (npm) `GHSA-9jrq-w75r-8gcw` | `ui-src/package-lock.json` | fixed | Direct devDependency is 8.3.8 (first patched release is 8.3.3; 8.3.8 matches Lazarette-Lite). |
+| dependabot 5 | vite (npm) `GHSA-rq7h-c2jc-7f22` | `ui-src/package-lock.json` | fixed | Same Vite 8.3.8 pin. |
+| dependabot 4 | vite (npm) `GHSA-vfpm-58rq-9qcg` | `ui-src/package-lock.json` | fixed | Same Vite 8.3.8 pin. |
+| dependabot 3 | vite (npm) `GHSA-r825-w8mm-5pxw` | `ui-src/package-lock.json` | fixed | Same Vite 8.3.8 pin. |
+| dependabot 2 | vite (npm) `GHSA-587h-7wmj-h5pm` | `ui-src/package-lock.json` | fixed | Same Vite 8.3.8 pin. |
+| dependabot 1 | vite (npm) `GHSA-698v-4r3x-3vcv` | `ui-src/package-lock.json` | fixed | Same Vite 8.3.8 pin. |
 
 ## `cs/user-controlled-bypass` (alerts 2–8)
 
