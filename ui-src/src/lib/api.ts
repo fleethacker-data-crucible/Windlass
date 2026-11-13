@@ -12,7 +12,7 @@ export class ApiError extends Error {
   }
 }
 
-/** In memory only. The API key, when the server has one, is kept for this tab (sessionStorage) by the session store. */
+/** In memory for this page only. The API key is not written to localStorage or sessionStorage. */
 export const credentials = { token: '', apiKey: '' };
 
 async function errorFrom(res: Response): Promise<ApiError> {

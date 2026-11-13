@@ -78,7 +78,7 @@ closes a dialog.
   server's own origin only, not another loopback port.
 - **Session token.** `POST /api/session` returns a random token that the other `/api/` routes need in an
   `X-Windlass-Session` header. When Windlass has an API key, `/api/session` needs it (`Authorization: Bearer`), so the page
-  asks for the key once and keeps it for the tab (`sessionStorage`), never in `localStorage`. The page's files carry no
+  asks for the key on each page load and keeps it in memory only, never in `localStorage` or `sessionStorage`. A reload asks for it again. The page's files carry no
   secret, so they load without the key. The token opens `/api/` only, never `/v1`. The page-close beacon cannot set
   headers, so `/api/heartbeat` also accepts the token in its JSON body, on that one route.
 - The page can read folder and file names on this computer through `GET /api/models`, so that route needs the session token like the rest (and so the API key when one is set).

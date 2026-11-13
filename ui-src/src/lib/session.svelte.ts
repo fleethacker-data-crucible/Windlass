@@ -2,7 +2,7 @@
 // the server, and knows when the server is gone.
 import * as api from './api';
 import { ApiError, credentials } from './api';
-import { keyStore } from './prefs.svelte';
+import { scrubStoredApiKey } from './prefs.svelte';
 import { startHeartbeat } from './presence';
 import type { Status } from './types';
 
@@ -23,25 +23,24 @@ class Session {
   private stopping = false;
 
   async boot(): Promise<void> {
-    credentials.apiKey = keyStore.load();
-    await this.connect(credentials.apiKey);
+    scrubStoredApiKey();
+    await this.connect('');
   }
 
   /** Called at start-up, and again from the key form when the server wants an API key. */
   async connect(apiKey: string): Promise<void> {
     this.keyError = '';
+    scrubStoredApiKey();
     try {
       const s = await api.openSession(apiKey);
       credentials.token = s.token;
       credentials.apiKey = apiKey;
-      keyStore.save(apiKey);
       await this.refresh();
       this.phase = 'ready';
       this.schedule();
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) {
         credentials.apiKey = '';
-        keyStore.save('');
         if (apiKey) this.keyError = 'That key was not accepted.';
         this.phase = 'needkey';
       } else {

@@ -958,6 +958,16 @@ namespace Windlass.Tests
                 Equal(200, Call("GET", "/v1/models", null, "Authorization", "Bearer s3cret").Status, "bearer key");
                 Equal(200, Call("POST", "/v1/chat/completions", Hi + "}", "X-Api-Key", "s3cret").Status, "x-api-key");
                 Equal(200, Call("GET", "/health", null).Status, "health needs no key");
+                // The path and method select the handler. The handler that returns models, a completion, or a
+                // session token calls Authorized first. A path that selects no such handler returns an error.
+                ExpectError(Call("GET", "/v1/models/", null), 401, "authentication_error");
+                ExpectError(Call("GET", "/v1/models/stub-model", null), 401, "authentication_error");
+                ExpectError(Call("POST", "/v1/chat/completions", Hi + "}"), 401, "authentication_error");
+                ExpectError(Call("GET", "/v1/chat/completions", null), 405, "invalid_request_error");
+                ExpectError(Call("POST", "/v1/chat/completions/", Hi + "}"), 404, "not_found_error");
+                ExpectError(Call("POST", "/api/session", ""), 401, "authentication_error");
+                ExpectError(Call("GET", "/api/session", ""), 405, "invalid_request_error");
+                Check(Call("GET", "/V1/models", null).Status != 200, "a differently cased path is not the model list");
             }
         }
 
