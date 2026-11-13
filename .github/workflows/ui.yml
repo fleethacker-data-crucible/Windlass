@@ -11,7 +11,7 @@ jobs:
   ui:
     name: windlass-ui
     # Linux runner: Node and npm are used here, never on the workstation. Python/bash are fine on Linux runners (STANDARDS.md, CI shells).
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, ubuntu-26.04, docker]
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
