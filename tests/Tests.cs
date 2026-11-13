@@ -966,7 +966,7 @@ namespace Windlass.Tests
                 ExpectError(Call("GET", "/v1/chat/completions", null), 405, "invalid_request_error");
                 ExpectError(Call("POST", "/v1/chat/completions/", Hi + "}"), 404, "not_found_error");
                 ExpectError(Call("POST", "/api/session", ""), 401, "authentication_error");
-                ExpectError(Call("GET", "/api/session", ""), 405, "invalid_request_error");
+                ExpectError(Call("GET", "/api/session", null), 405, "invalid_request_error");
                 Check(Call("GET", "/V1/models", null).Status != 200, "a differently cased path is not the model list");
             }
         }
