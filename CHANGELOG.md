@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- `info` and `run` take `--json` and `--out` (`windlass.info/1`, `windlass.run/1`, UTF-8 without a BOM). `commands --out` writes `windlass.commands/1` the same way. `serve --stay` is the lifecycle name for `--no-auto-stop`. `serve --replace`, from the launcher, stops a running Windlass of this version and starts this one; a newer copy is left running.
 - The browser UI keeps the API key in memory for the page only. It is not written to `sessionStorage` or `localStorage`, and a reload asks for it again (`docs/UI.md`).
 - UI devDependency `vite` is 8.3.8, the same 8.3 patch Lazarette-Lite uses. The open Vite advisories were first patched in 8.3.3.
 - **Sharp tray icon.** The notification-area icon is drawn at the tray's real size for the display scale (16 px at 100 %, 24 px at 150 %) by the shared FleetHacker tray kit (`src/vendor/fleet-tray`, edge-ops `ui-kit/tray` 1.0.0): a bold W tile instead of the detailed mark loaded at 16 px and stretched. `assets/brand/tray.ico` is regenerated from the kit (16 to 256 px) and is used at the same size where `Add-Type` is blocked; `build/New-WindlassBrand.ps1` now writes it with `Export-FleetTrayIco`.

@@ -6,8 +6,8 @@
 Launch-Windlass.bat                                                    :: serve --open with no model: pick one in the UI
 Launch-Windlass.bat serve --model D:\models\model.gguf                 :: the API on http://127.0.0.1:8777/v1 (the UI is at /)
 Launch-Windlass.bat serve --model D:\models\model.gguf --open          :: the same, and opens the browser UI (docs/UI.md)
-Launch-Windlass.bat info  --model D:\models\model.gguf                 :: shape, file sizes, RAM per layer, KV cache per token
-Launch-Windlass.bat run   --model D:\models\model.gguf --prompt "Hi"   :: one reply in the console, no server
+Launch-Windlass.bat info  --model D:\models\model.gguf [--json]       :: shape, file sizes, RAM per layer, KV cache per token
+Launch-Windlass.bat run   --model D:\models\model.gguf --prompt "Hi"   :: one reply in the console, no server (--json for windlass.run/1)
 Launch-Windlass.bat playbook probe --model D:\models\model.gguf        :: measure this computer, write its playbook
 Launch-Windlass.bat playbook show  --model D:\models\model.gguf        :: the settings serve and run would use now, and why
 Launch-Windlass.bat playbook eval  --model D:\models\model.gguf        :: quality score (perplexity) and prompt speed
@@ -66,9 +66,12 @@ log). Long budgets are for you to run when you can spare the machine; a short lo
 conversation. A tiny random model recalls nothing (chance for free recall is close to zero), so the tests prove the
 machinery, not model quality.
 
-`--json` on `playbook probe`, `playbook show`, `playbook eval`, `playbook fidelity` and `commands` prints a versioned JSON document (`windlass.playbook/1`,
-`windlass.quality/1`, `windlass.fidelity/1`, `windlass.commands/1`), and `--out <file>` writes it as UTF-8 without a BOM, so scripts and agents can use them
-(see the Fleet CLI parity proposal). Exit code 0 is success, 1 an error, 2 a usage error.
+`--json` on `playbook probe`, `playbook show`, `playbook eval`, `playbook fidelity`, `commands`, `info` and `run` prints a versioned JSON document (`windlass.playbook/1`,
+`windlass.quality/1`, `windlass.fidelity/1`, `windlass.commands/1`, `windlass.info/1`, `windlass.run/1`), and `--out <file>` writes that same document as UTF-8 without a BOM
+and does not also print it. `info` without `--json` stays text. `run --json` puts the reply in `text` and does not stream tokens to the console.
+Exit code 0 is success, 1 an error, 2 a usage error.
+
+`serve --stay` is the lifecycle standard's name for `--no-auto-stop` (heartbeats do not stop the engine). `serve --replace` stops a running Windlass of this same version and starts this one. A newer copy is left running. Without `--replace`, starting again reuses the running instance.
 
 ## Batching
 

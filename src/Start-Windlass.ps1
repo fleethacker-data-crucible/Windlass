@@ -101,12 +101,23 @@ if ($command -eq 'serve' -and -not ($cliArgs | Where-Object { $_ -eq '--port' -o
         exit 1
     }
     if ($fleet.Action -eq 'Reuse') {
-        Write-Host "Windlass $($fleet.Existing.Version) is already running on http://127.0.0.1:$($fleet.Port)/v1 (pid $($fleet.Existing.Pid)). Stop it with src\Stop-Windlass.ps1 first."
-        if ($cliArgs -contains '--open') {
-            Write-Host 'Opening its browser UI.'
-            Open-WindlassWindow -Url "http://127.0.0.1:$($fleet.Port)/"
+        # --replace is the lifecycle standard's "start fresh". A newer copy is never stopped (FleetPort never downgrades).
+        $cmp = Compare-FleetVersion ([string]$fleet.Existing.Version) $version
+        $newer = ($null -ne $cmp -and $cmp -gt 0)
+        if (($cliArgs -contains '--replace') -and -not $newer) {
+            Write-Host "Stopping Windlass $($fleet.Existing.Version) on port $($fleet.Port) (pid $($fleet.Existing.Pid)) because --replace was given."
+            if (-not (Stop-FleetInstance -Instance $fleet.Existing)) {
+                Write-Host "Could not stop the running Windlass. Close it, then start again." -ForegroundColor Red
+                exit 1
+            }
+        } else {
+            Write-Host "Windlass $($fleet.Existing.Version) is already running on http://127.0.0.1:$($fleet.Port)/v1 (pid $($fleet.Existing.Pid)). Stop it with src\Stop-Windlass.ps1 first, or pass --replace."
+            if ($cliArgs -contains '--open') {
+                Write-Host 'Opening its browser UI.'
+                Open-WindlassWindow -Url "http://127.0.0.1:$($fleet.Port)/"
+            }
+            exit 0
         }
-        exit 0
     }
     $cliArgs += @('--port', [string]$fleet.Port)
 }

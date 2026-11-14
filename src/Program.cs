@@ -19,8 +19,8 @@ namespace Windlass
 
   Launch-Windlass.bat serve [--model <file.gguf>] [options]   run the server on http://127.0.0.1:8777/v1 (without --model
                           it starts empty and the browser UI loads a model)
-  Launch-Windlass.bat run   --model <file.gguf> --prompt <text> [options]   one reply in the console
-  Launch-Windlass.bat info  --model <file.gguf>   model shape, sizes and RAM needed
+  Launch-Windlass.bat run   --model <file.gguf> --prompt <text> [--json] [--out <file>] [options]   one reply in the console
+  Launch-Windlass.bat info  --model <file.gguf> [--json] [--out <file>]   model shape, sizes and RAM needed
   Launch-Windlass.bat playbook probe --model <file.gguf> [--json] [--out <file>]
                           measure this computer and write its playbook for the model (also: probe)
   Launch-Windlass.bat playbook show  --model <file.gguf> [--json] [--out <file>]
@@ -30,7 +30,7 @@ namespace Windlass
   Launch-Windlass.bat playbook fidelity --model <file.gguf> [--facts <n>] [--tokens <n>] [--questions <k>] [--seed <n>] [--json] [--out <file>]
                           context fidelity: plant n facts in a log of about <n> tokens, ask for them back, score the recalls
                           (default 4 facts, 300 tokens: a long log is slow on a CPU)
-  Launch-Windlass.bat commands [--json]   every command with its inputs and outputs
+  Launch-Windlass.bat commands [--json] [--out <file>]   every command with its inputs and outputs
 
 serve and run pick their settings from this computer's playbook (RAM free, cores, battery; plus measurements after
 playbook probe). Any option below that you give yourself overrides the playbook's choice. --json prints a versioned
@@ -50,6 +50,8 @@ Options:
   --int-dot               integer dot products with 8-bit activations, llama.cpp's CPU method (default off; logits move slightly)
   --no-playbook           ignore the playbook; use the defaults and the options given
   --no-auto-stop          do not stop when the programs that sent heartbeats are gone (or set WINDLASS_AUTO_STOP=0)
+  --stay                  the same as --no-auto-stop (the lifecycle standard's name for it)
+  --replace               serve, from the launcher: stop the running Windlass of this version and start this one
   --open                  serve: open the browser UI, and stop when its tab closes (the tab owns the server; add
                           --no-auto-stop to keep serving after it closes). Without --open the UI is still at the
                           server's address, but closing it never stops the server
@@ -116,7 +118,7 @@ Options:
             }
         }
 
-        static readonly string[] Flags = { "int-dot", "no-auto-stop", "no-prefetch", "no-playbook", "stub", "verbose", "json", "guess", "no-guess", "open", "no-ui", "tray", "no-tray" };
+        static readonly string[] Flags = { "int-dot", "no-auto-stop", "stay", "replace", "no-prefetch", "no-playbook", "stub", "verbose", "json", "guess", "no-guess", "open", "no-ui", "tray", "no-tray" };
 
         public static Dictionary<string, string> ParseArgs(string[] args, int from)
         {
@@ -136,6 +138,27 @@ Options:
                 o[key] = val ?? "1";
             }
             return o;
+        }
+
+        // --json prints the document. --out writes that same document and does not also print it (playbook does this).
+        static bool WantsJson(Dictionary<string, string> o)
+        {
+            return o.ContainsKey("json") || o.ContainsKey("out");
+        }
+
+        static void EmitDocument(Dictionary<string, string> o, string doc)
+        {
+            string outPath;
+            if (o.TryGetValue("out", out outPath)) File.WriteAllText(Path.GetFullPath(outPath), doc, new UTF8Encoding(false));
+            else Console.WriteLine(doc);
+        }
+
+        // Heartbeats may stop the engine unless the operator turned that off. --stay is the lifecycle standard's name
+        // for --no-auto-stop. WINDLASS_AUTO_STOP=0 is the same switch from the environment.
+        public static bool AutoStopEnabled(Dictionary<string, string> o)
+        {
+            if (o.ContainsKey("no-auto-stop") || o.ContainsKey("stay")) return false;
+            return Environment.GetEnvironmentVariable("WINDLASS_AUTO_STOP") != "0";
         }
 
         static string Need(Dictionary<string, string> o, string key)
@@ -409,19 +432,19 @@ Options:
         // commands: the CLI describes itself, so an agent can find every command and its inputs and outputs.
         static readonly string[][] CommandList =
         {
-            new[] { "serve", "--model [--model-id --port --api-key --context-length --cache-gb --no-prefetch --threads --int-dot --guess --no-guess --batch --no-playbook --chat-template --max-tokens --max-queue --keepalive --no-auto-stop --open --tray --no-tray --no-ui --stub --verbose]", "an OpenAI-compatible server and browser UI on 127.0.0.1 (see docs/API.md)" },
-            new[] { "run", "--model --prompt [--system --max-tokens --temperature and the serve options above]", "one reply in the console" },
-            new[] { "info", "--model", "the model's shape, sizes and RAM needs (text)" },
+            new[] { "serve", "--model [--model-id --port --api-key --context-length --cache-gb --no-prefetch --threads --int-dot --guess --no-guess --batch --no-playbook --chat-template --max-tokens --max-queue --keepalive --no-auto-stop --stay --replace --open --tray --no-tray --no-ui --stub --verbose]", "an OpenAI-compatible server and browser UI on 127.0.0.1 (see docs/API.md)" },
+            new[] { "run", "--model --prompt [--system --max-tokens --temperature --json --out and the serve options above]", "one reply in the console, or windlass.run/1 with --json or --out" },
+            new[] { "info", "--model [--json --out]", "windlass.info/1 with --json or --out; otherwise the model's shape, sizes and RAM needs as text" },
             new[] { "playbook probe", "--model [--model-id --json --out]", "windlass.playbook/1: machine, measurements, settings, rules; saved in playbooks\\" },
             new[] { "playbook show", "--model [--model-id --json --out]", "windlass.playbook/1 for the settings serve and run would use now" },
             new[] { "playbook eval", "--model [--model-id --tokens --json --out]", "windlass.playbook/1 with quality: perplexity on the built-in passage (lower is better) and prompt seconds per token" },
             new[] { "playbook fidelity", "--model [--model-id --facts --tokens --questions --seed --json --out]", "windlass.fidelity/1: facts recalled out of facts asked in a synthetic log of about --tokens tokens; the score is saved in the playbook" },
-            new[] { "commands", "[--json]", "windlass.commands/1: this list" },
+            new[] { "commands", "[--json --out]", "windlass.commands/1: this list" },
         };
 
         static int Commands(Dictionary<string, string> o)
         {
-            if (!o.ContainsKey("json"))
+            if (!WantsJson(o))
             {
                 foreach (string[] c in CommandList) Console.WriteLine(c[0].PadRight(16) + c[1] + "\n" + "".PadRight(16) + "-> " + c[2]);
                 return 0;
@@ -436,7 +459,7 @@ Options:
             Dictionary<string, object> doc = new Dictionary<string, object>();
             doc["schema"] = "windlass.commands/1";
             doc["commands"] = list;
-            Console.WriteLine(Json.Write(doc));
+            EmitDocument(o, Json.Write(doc));
             return 0;
         }
 
@@ -525,7 +548,7 @@ Options:
             s.DefaultMaxTokens = Int(o, "max-tokens", 1024, 1, 1 << 20);
             s.Version = version;
             s.ScriptPath = scriptPath;
-            s.AutoStop = !o.ContainsKey("no-auto-stop") && Environment.GetEnvironmentVariable("WINDLASS_AUTO_STOP") != "0";
+            s.AutoStop = AutoStopEnabled(o);
             string uiRoot = Path.Combine(root, "ui", "dist");
             if (!o.ContainsKey("no-ui") && Directory.Exists(uiRoot)) s.UiRoot = uiRoot;
             s.UiOwnsLife = UiOwnsServer(o, s.UiRoot != null);
@@ -590,21 +613,42 @@ Options:
 
         static int RunOnce(Dictionary<string, string> o, string root)
         {
+            bool json = WantsJson(o);
             LayeredBackend b = new LayeredBackend(Engine(o, root));
-            b.Load();
-            GenerationRequest r = new GenerationRequest();
-            string sys;
-            if (o.TryGetValue("system", out sys)) r.Messages.Add(new ChatMessage("system", sys));
-            r.Messages.Add(new ChatMessage("user", Need(o, "prompt")));
-            r.MaxTokens = Int(o, "max-tokens", 256, 1, 1 << 20);
-            r.Temperature = Dbl(o, "temperature", 0, 0, 2);
-            Stopwatch sw = Stopwatch.StartNew();
-            GenerationResult res = b.Generate(r, delegate(string t) { Console.Write(t); }, null, CancellationToken.None);
-            Console.WriteLine();
-            Log.Info(string.Format("{0}: {1} prompt + {2} completion tokens in {3:F1}s, {4:F1} GB read from disk",
-                res.FinishReason, res.PromptTokens, res.CompletionTokens, sw.Elapsed.TotalSeconds, b.Model.Stream.BytesRead / 1e9));
-            b.Dispose();
-            return 0;
+            try
+            {
+                b.Load();
+                GenerationRequest r = new GenerationRequest();
+                string sys;
+                if (o.TryGetValue("system", out sys)) r.Messages.Add(new ChatMessage("system", sys));
+                r.Messages.Add(new ChatMessage("user", Need(o, "prompt")));
+                r.MaxTokens = Int(o, "max-tokens", 256, 1, 1 << 20);
+                r.Temperature = Dbl(o, "temperature", 0, 0, 2);
+                StringBuilder text = new StringBuilder();
+                Stopwatch sw = Stopwatch.StartNew();
+                GenerationResult res = b.Generate(r, delegate(string t)
+                {
+                    text.Append(t);
+                    if (!json) Console.Write(t);
+                }, null, CancellationToken.None);
+                double seconds = sw.Elapsed.TotalSeconds;
+                long bytesRead = b.Model.Stream.BytesRead;
+                Log.Info(string.Format("{0}: {1} prompt + {2} completion tokens in {3:F1}s, {4:F1} GB read from disk",
+                    res.FinishReason, res.PromptTokens, res.CompletionTokens, seconds, bytesRead / 1e9));
+                if (!json) { Console.WriteLine(); return 0; }
+                Dictionary<string, object> doc = new Dictionary<string, object>();
+                doc["schema"] = "windlass.run/1";
+                doc["model"] = b.ModelId;
+                doc["finishReason"] = res.FinishReason;
+                doc["promptTokens"] = (long)res.PromptTokens;
+                doc["completionTokens"] = (long)res.CompletionTokens;
+                doc["seconds"] = seconds;
+                doc["bytesRead"] = bytesRead;
+                doc["text"] = text.ToString();
+                EmitDocument(o, Json.Write(doc));
+                return 0;
+            }
+            finally { b.Dispose(); }
         }
 
         static int Info(Dictionary<string, string> o)
@@ -626,6 +670,42 @@ Options:
                 long sz = 0;
                 foreach (GgufTensor t in g.Tensors) if (t.Name.StartsWith("blk." + l + ".", StringComparison.Ordinal)) sz += t.SizeBytes;
                 if (sz > layer) layer = sz;
+            }
+            Dictionary<string, object> typesJson = new Dictionary<string, object>();
+            foreach (KeyValuePair<string, long> kv in types) typesJson[kv.Key] = kv.Value;
+            List<object> warnings = new List<object>();
+            foreach (string w in c.Warnings) warnings.Add(w);
+            if (WantsJson(o))
+            {
+                Dictionary<string, object> r = new Dictionary<string, object>();
+                r["schema"] = "windlass.info/1";
+                r["name"] = c.Name ?? "";
+                r["architecture"] = c.Arch;
+                r["qkNorm"] = c.QkNorm;
+                r["tiedEmbeddings"] = c.TiedEmbeddings;
+                r["moe"] = c.Moe;
+                r["layers"] = (long)c.Layers;
+                r["layerBytes"] = layer;
+                r["expertCount"] = (long)c.ExpertCount;
+                r["expertUsed"] = (long)c.ExpertUsed;
+                r["expertFf"] = (long)c.ExpertFf;
+                r["sharedExpertFf"] = (long)c.SharedExpertFf;
+                r["expertWeightsNorm"] = c.ExpertWeightsNorm;
+                r["weightBytes"] = g.TotalBytes;
+                r["files"] = (long)g.Paths.Count;
+                r["types"] = typesJson;
+                r["embd"] = (long)c.Embd;
+                r["heads"] = (long)c.Heads;
+                r["kvHeads"] = (long)c.KvHeads;
+                r["headDim"] = (long)c.HeadDim;
+                r["vocab"] = (long)c.Vocab;
+                r["contextLength"] = (long)c.ContextLength;
+                r["kvBytesPerToken"] = 4L * c.Layers * c.KvDim;
+                r["tokenizer"] = tok.Spm ? "sentencepiece" : "bpe";
+                r["chatTemplate"] = tpl.Name;
+                r["warnings"] = warnings;
+                EmitDocument(o, Json.Write(r));
+                return 0;
             }
             Console.WriteLine("name            " + c.Name);
             Console.WriteLine("architecture    " + c.Arch + (c.QkNorm ? " (QK norm)" : "") + (c.TiedEmbeddings ? ", tied embeddings" : ""));

@@ -10,14 +10,14 @@ with the gaps stated. `Launch-Windlass.bat commands --json` (`windlass.commands/
 | Action | CLI command | API route | Output |
 | --- | --- | --- | --- |
 | Serve a model | `serve` | (the server itself) | OpenAI-compatible API on `127.0.0.1:8777-8779` |
-| Chat completion, streamed or not | `run` (one reply in the console) | `POST /v1/chat/completions` | OpenAI chat completion or SSE chunks; `usage` on both |
+| Chat completion, streamed or not | `run` (one reply in the console) | `POST /v1/chat/completions` | OpenAI chat completion or SSE chunks; `usage` on both. `run --json` or `--out` prints `windlass.run/1` (the reply text, finish reason, token counts) |
 | List the model | `info` (shape and RAM needs) | `GET /v1/models`, `GET /v1/models/{id}` | OpenAI model list with `context_length` |
-| Inspect a model file | `info` | none (needs a file path, not a loaded model) | text |
+| Inspect a model file | `info` | none (needs a file path, not a loaded model) | text, or `windlass.info/1` with `--json` or `--out` |
 | Measure this computer | `playbook probe` | none | `windlass.playbook/1` |
 | Show the settings that would be used | `playbook show` | none | `windlass.playbook/1` |
 | Score the model (perplexity) | `playbook eval` | none | `windlass.playbook/1` with quality |
 | Check long-context recall | `playbook fidelity` | none | `windlass.fidelity/1`; the score is also recorded in the playbook and published in `GET /v1/models` |
-| List commands | `commands [--json]` | none | `windlass.commands/1` |
+| List commands | `commands [--json] [--out]` | none | `windlass.commands/1` |
 | Health and load state | none | `GET /health` | JSON: state, model, busy, queued |
 | Identify the tool, find its pid | none | `GET /__fleethacker/id` | JSON: tool, version, pid |
 | Stop | `src\Stop-Windlass.ps1` | `POST /__fleethacker/shutdown` (header `X-FleetHacker-Shutdown: 1`), `POST /api/shutdown` (UI session token) | `{"stopping": true}` |
@@ -36,7 +36,7 @@ with the gaps stated. `Launch-Windlass.bat commands --json` (`windlass.commands/
 | --- | --- | --- |
 | 1 | No GUI-only code paths | **Met**: every page of the UI reads or calls a route above, and the commands that measure (`probe`, `eval`, `fidelity`) are not in the UI at all, only shown there |
 | 2 | Named commands `<app> <noun> <verb>` | **Partly**: `playbook probe\|show\|eval` follow it; `serve`, `run`, `info` and `commands` are single words, and there is no `windlass <noun> <verb>` spelling for the API routes |
-| 3 | `--json` with a versioned schema; `--out`, UTF-8 without BOM | **Partly**: `playbook *` and `commands` have `--json` and `--out`; `info` and `run` print text only (gap) |
+| 3 | `--json` with a versioned schema; `--out`, UTF-8 without BOM | **Met** for Windlass's own schemas: `playbook *`, `commands`, `info` (`windlass.info/1`) and `run` (`windlass.run/1`) take `--json` and `--out` (UTF-8, no BOM). This is not the FleetAction result envelope (`ok` / `action` / `v` / `result`); switching `commands --json` to that envelope would break `windlass.commands/1` |
 | 4 | Open, documented project files | **Met** for the playbook (`playbooks\*.json`, schema `windlass.playbook/1`); Windlass has no other project files |
 | 5 | Headless; `--yes`, `--dry-run`; loopback on the registry port | **Met** for headless and the port block; no command asks for confirmation, so `--yes` and `--dry-run` have nothing to do yet |
 | 6 | Stable IDs across the Fleet | Not applicable (Windlass makes no shared assets) |
@@ -44,10 +44,16 @@ with the gaps stated. `Launch-Windlass.bat commands --json` (`windlass.commands/
 | 8 | A parity test in CI | **Partly**: `tests\ParityTests.cs` checks this page against `commands --json` and the routes in `src\Server.cs`; there are no GUI actions to register |
 | 9 | Locked to this user: session token file, Host/Origin checks, no CORS, confirm on destructive calls | **Partly**: Host and Origin are checked on every request, a request with a non-loopback `Origin` gets 403, but a loopback page on any port is answered with CORS headers (the proposal says send none: a deviation, kept so local web UIs can call it), and an optional `--api-key` / `WINDLASS_API_KEY` bearer key exists. The UI's `/api/` routes need a per-session token (`POST /api/session`, which needs the API key when one is set) and answer this server's own origin only, but there is still **no per-session token file** for other programs (gap), and the only destructive route, shutdown, needs a custom header, not `confirm: true`. Researcher sign-off has not happened |
 
-## Gaps to close (not done here)
+## Gaps still open
 
-1. `--json` and `--out` for `info` (and a JSON result for `run`).
-2. A generated list of the API routes (OpenAPI) and MCP tools from the same registry as `commands`.
-3. The per-session token file (requirement 9) and `confirm` on shutdown; both are decisions for the owner, since Fairlead and
-   `Stop-Windlass.ps1` call these routes today.
+1. A generated list of the API routes (OpenAPI) and MCP tools from the same registry as `commands`. The adopted FleetAction
+   contract (fleet-action-baseline v1.0.1) generates those from a vendored module. Vendoring it here also needs the
+   conformance workflow, which is a `.github/workflows` file this change does not add, and its HTTP listener would replace
+   the optional API key with a session-token file. That key behavior is waiting on a decision, and Fairlead already calls
+   these routes with its own client key. See issue 17.
+2. The per-session token file (requirement 9) and `confirm` on shutdown. Both change routes Fairlead and
+   `Stop-Windlass.ps1` call today. The in-memory API key behavior is also waiting on that decision, so this page does not
+   change it.
+3. Command names `serve`, `run`, `info` and `commands` are still single words. Renaming them to `<noun> <verb>` would break
+   every caller. `playbook probe|show|eval|fidelity` already use noun and verb.
 4. An end-to-end agent job across Fleet apps using only the CLI or API (adoption checklist), which needs the other apps.
