@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { keyStore, prefs, type Theme } from '$lib/prefs.svelte';
+  import { prefs, type Theme } from '$lib/prefs.svelte';
   import { session } from '$lib/session.svelte';
   import { confirm } from '$lib/confirm.svelte';
   import { credentials } from '$lib/api';
@@ -16,7 +16,6 @@
 
   async function forgetKey() {
     credentials.apiKey = '';
-    keyStore.save('');
     await session.connect('');
   }
 
@@ -67,7 +66,7 @@
         <p class="mt-2 text-[12px] text-muted-foreground">These are set when Windlass starts (see <code class="font-mono">Launch-Windlass.bat help</code>); this page shows them and does not change them.</p>
       {/if}
       {#if s?.apiKeyRequired && credentials.apiKey}
-        <div class="mt-3"><button class="fl-btn fl-btn--secondary" onclick={forgetKey}>Forget the API key in this tab</button></div>
+        <div class="mt-3"><button class="fl-btn fl-btn--secondary" onclick={forgetKey}>Forget the API key</button></div>
       {/if}
     </section>
 

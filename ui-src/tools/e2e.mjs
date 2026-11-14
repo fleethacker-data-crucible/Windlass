@@ -135,6 +135,12 @@ m = mock(18915, 'key'); await wait(600);
   await page.waitForSelector('[data-testid=state-card]');
   ok(true, 'key: the form refuses a wrong key and accepts the right one');
   ok(!(await page.evaluate(() => JSON.stringify(localStorage))).includes('sesame'), 'key: never written to localStorage');
+  ok(!(await page.evaluate(() => JSON.stringify(sessionStorage))).includes('sesame'), 'key: never written to sessionStorage');
+  await page.reload();
+  await page.waitForSelector('[data-testid=key-input]');
+  ok((await page.inputValue('[data-testid=key-input]')) === '', 'key: a reload asks for the key again');
+  await page.fill('[data-testid=key-input]', 'sesame'); await page.click('[data-testid=key-submit]');
+  await page.waitForSelector('[data-testid=state-card]');
   await page.click('[data-testid=nav-chat]'); await page.fill('[data-testid=chat-input]', 'Hi'); await page.click('[data-testid=chat-send]');
   await page.waitForSelector('[data-testid=turn-stats]');
   ok((await page.textContent('[data-testid=turn-assistant]')).includes('Hello'), 'key: chat sends the key as a Bearer token'); await ctx.close(); }

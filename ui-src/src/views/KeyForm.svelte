@@ -15,7 +15,7 @@
     <BrandMark size={40} />
     <div>
       <h1 class="font-display text-[20px]">API key</h1>
-      <p class="mt-1 text-[13px] text-muted-foreground">This Windlass was started with an API key. Enter it to use the page. It is kept for this tab only and sent to this server only.</p>
+      <p class="mt-1 text-[13px] text-muted-foreground">This Windlass was started with an API key. Enter it to use the page. It stays in memory for this page only, is not saved in browser storage, and is sent to this server only. Reloading asks for it again.</p>
     </div>
     <div class="grid gap-1.5">
       <label class="fl-eyebrow" for="key">Key</label>

@@ -47,21 +47,15 @@ class Prefs {
 
 export const prefs = new Prefs();
 
-/** The API key lives for this tab only (sessionStorage); it is never written to localStorage. */
-export const keyStore = {
-  load: () => {
-    try {
-      return sessionStorage.getItem('windlass-api-key') ?? '';
-    } catch {
-      return '';
-    }
-  },
-  save: (key: string) => {
-    try {
-      if (key) sessionStorage.setItem('windlass-api-key', key);
-      else sessionStorage.removeItem('windlass-api-key');
-    } catch {
-      /* storage unavailable: the key is asked for again after a reload */
-    }
+/**
+ * Drops a leftover API key from an older build. The key is kept in memory for this page only
+ * (`credentials` in api.ts): it is never read back from storage and never written.
+ */
+export function scrubStoredApiKey(storage?: { removeItem(key: string): void } | null): void {
+  try {
+    const target = storage !== undefined ? storage : typeof sessionStorage === 'undefined' ? null : sessionStorage;
+    if (target) target.removeItem('windlass-api-key');
+  } catch {
+    /* storage unavailable */
   }
-};
+}
