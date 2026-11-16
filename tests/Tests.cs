@@ -73,6 +73,7 @@ namespace Windlass.Tests
                 Add(tests, "playbook: guess-ahead follows the batch cost and what real runs showed", PlaybookGuessAhead);
                 Add(tests, "playbook: saved, reused only on the same machine and model, and applied by the CLI", PlaybookSavedAndApplied);
                 Add(tests, "cli: commands and playbook show print versioned JSON; --out writes UTF-8 without a BOM", CliJson);
+                Add(tests, "cli: info and run --json and --out; --stay turns auto-stop off", CliInfoRunJson);
                 Add(tests, "api: models, health and fleethacker id", ApiBasics);
                 Add(tests, "tray: --tray keeps the engine up when the browser tab is gone; --open alone does not", TrayOwnership);
                 Add(tests, "tray: the engine runs behind the icon, reports its status, and Quit stops it and removes its runtime file", TrayEngineOutlivesTheBrowser);
@@ -730,6 +731,85 @@ namespace Windlass.Tests
             Dictionary<string, object> measured = probed["measured"] as Dictionary<string, object>;
             Check(Json.GetNum(measured, "readGBps", 0) > 0 && Json.GetNum(measured, "layerSecLogical", 0) > 0, "probe measures read speed and layer time");
             Check(Json.GetNum(((Dictionary<string, object>)probed["settings"]), "predictedSecPerToken", 0) > 0, "probe predicts seconds per token");
+        }
+
+        static void CliInfoRunJson()
+        {
+            Dictionary<string, string> stay = Program.ParseArgs(new string[] { "serve", "--stay", "--replace" }, 1);
+            Check(!Program.AutoStopEnabled(stay), "--stay turns auto-stop off");
+            Dictionary<string, string> off = Program.ParseArgs(new string[] { "serve", "--no-auto-stop" }, 1);
+            Check(!Program.AutoStopEnabled(off), "--no-auto-stop turns auto-stop off");
+            string saved = Environment.GetEnvironmentVariable("WINDLASS_AUTO_STOP");
+            try
+            {
+                Environment.SetEnvironmentVariable("WINDLASS_AUTO_STOP", null);
+                Check(Program.AutoStopEnabled(Program.ParseArgs(new string[] { "serve" }, 1)), "auto-stop is on when nothing turns it off");
+                Environment.SetEnvironmentVariable("WINDLASS_AUTO_STOP", "0");
+                Check(!Program.AutoStopEnabled(Program.ParseArgs(new string[] { "serve" }, 1)), "WINDLASS_AUTO_STOP=0 turns auto-stop off");
+            }
+            finally { Environment.SetEnvironmentVariable("WINDLASS_AUTO_STOP", saved); }
+
+            string model = Model(new TinySpec { Arch = "llama", Type = GgmlType.Q8_0 });
+            string infoFile = Path.Combine(_temp, "info-out.json");
+            string runFile = Path.Combine(_temp, "run-out.json");
+            string cmdFile = Path.Combine(_temp, "commands-out.json");
+            TextWriter old = Console.Out;
+            StringWriter sw = new StringWriter();
+            int rcInfo, rcHuman, rcRun, rcCmd;
+            try
+            {
+                Console.SetOut(sw);
+                rcInfo = Program.Run(new string[] { "info", "--model", model, "--json" }, _temp, null, "0");
+                rcHuman = Program.Run(new string[] { "info", "--model", model }, _temp, null, "0");
+                rcRun = Program.Run(new string[] { "run", "--model", model, "--prompt", "Hi", "--max-tokens", "2", "--temperature", "0", "--no-playbook", "--json" }, _temp, null, "0");
+                rcCmd = Program.Run(new string[] { "commands", "--out", cmdFile }, _temp, null, "0");
+                Check(Program.Run(new string[] { "info", "--model", model, "--out", infoFile }, _temp, null, "0") == 0, "info --out exit");
+                Check(Program.Run(new string[] { "run", "--model", model, "--prompt", "Hi", "--max-tokens", "2", "--temperature", "0", "--no-playbook", "--out", runFile }, _temp, null, "0") == 0, "run --out exit");
+            }
+            finally { Console.SetOut(old); }
+            Equal(0, rcInfo, "info --json exit");
+            Equal(0, rcHuman, "info text exit");
+            Equal(0, rcRun, "run --json exit");
+            Equal(0, rcCmd, "commands --out exit");
+
+            string[] lines = sw.ToString().Split(new char[] { '\n' }, StringSplitOptions.RemoveEmptyEntries);
+            Dictionary<string, object> info = Json.Parse(lines[0].Trim()) as Dictionary<string, object>;
+            Equal("windlass.info/1", Json.GetStr(info, "schema", ""), "info schema");
+            Equal("llama", Json.GetStr(info, "architecture", ""), "info architecture");
+            Check(Json.GetStr(info, "name", "").StartsWith("tiny-"), "info name");
+            Check(Json.GetNum(info, "layers", 0) > 0 && Json.GetNum(info, "contextLength", 0) > 0, "info shape");
+            Check(Json.GetNum(info, "kvBytesPerToken", 0) == 4.0 * Json.GetNum(info, "layers", 0) * Json.GetNum(info, "kvHeads", 0) * Json.GetNum(info, "headDim", 0), "kv bytes per token");
+            Check(info["moe"] is bool && (bool)info["moe"] == false, "a llama file is not MoE");
+            Check(info["types"] is Dictionary<string, object> && info["warnings"] is List<object>, "info types and warnings");
+            Check(!lines[0].Contains("architecture    "), "info --json is not the text layout");
+            Check(sw.ToString().Contains("architecture    llama"), "info without --json stays text");
+
+            Dictionary<string, object> run = null;
+            foreach (string line in lines)
+            {
+                string t = line.Trim();
+                if (t.Length == 0 || t[0] != '{') continue;
+                Dictionary<string, object> doc = Json.Parse(t) as Dictionary<string, object>;
+                if (doc != null && Json.GetStr(doc, "schema", "") == "windlass.run/1") run = doc;
+            }
+            Check(run != null, "run --json printed one document");
+            Equal("windlass.run/1", Json.GetStr(run, "schema", ""), "run schema");
+            Check(Json.GetStr(run, "finishReason", "").Length > 0, "run finish reason");
+            Check(Json.GetNum(run, "promptTokens", 0) > 0 && Json.GetNum(run, "completionTokens", 0) > 0, "run token counts");
+            Check(run.ContainsKey("text") && run["text"] is string, "run text is a string");
+
+            byte[] infoRaw = File.ReadAllBytes(infoFile);
+            byte[] runRaw = File.ReadAllBytes(runFile);
+            byte[] cmdRaw = File.ReadAllBytes(cmdFile);
+            Check(infoRaw.Length > 3 && !(infoRaw[0] == 0xEF && infoRaw[1] == 0xBB && infoRaw[2] == 0xBF), "info --out has no BOM");
+            Check(runRaw.Length > 3 && !(runRaw[0] == 0xEF && runRaw[1] == 0xBB && runRaw[2] == 0xBF), "run --out has no BOM");
+            Check(cmdRaw.Length > 3 && !(cmdRaw[0] == 0xEF && cmdRaw[1] == 0xBB && cmdRaw[2] == 0xBF), "commands --out has no BOM");
+            Equal("windlass.info/1", Json.GetStr(Json.Parse(Encoding.UTF8.GetString(infoRaw)) as Dictionary<string, object>, "schema", ""), "info file schema");
+            Equal("windlass.run/1", Json.GetStr(Json.Parse(Encoding.UTF8.GetString(runRaw)) as Dictionary<string, object>, "schema", ""), "run file schema");
+            Dictionary<string, object> cmds = Json.Parse(Encoding.UTF8.GetString(cmdRaw)) as Dictionary<string, object>;
+            Equal("windlass.commands/1", Json.GetStr(cmds, "schema", ""), "commands file schema");
+            Check(Json.Write(cmds).Contains("windlass.info/1") && Json.Write(cmds).Contains("windlass.run/1"), "commands lists the new schemas");
+            Check(!sw.ToString().Contains(cmdFile), "commands --out does not print the path");
         }
 
         // ---------------- API ----------------

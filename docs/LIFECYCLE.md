@@ -10,10 +10,10 @@ that page when it owns the server, and otherwise map to "whatever started it": a
 | 2 | Never stop mid-write | **Yes.** A running or queued request holds the stop; it happens on the first check after the last one ends |
 | 3 | An explicit way out in the UI | **Yes.** *End session* in the sidebar and in Settings, behind a confirm (`POST /api/shutdown`). `POST /__fleethacker/shutdown` is the way out for a program such as Fairlead |
 | 4 | A `Stop-<App>.ps1` that needs no PIDs | **Yes.** `src\Stop-Windlass.ps1` |
-| 5 | One instance: detect a running engine, `--replace`, `--stay` | **Partly.** `Start-Windlass.ps1` reuses the port block with the Fleet port helper and reports a running instance of the same version; it does not ask to replace it and has no `--replace` or `--stay` (a server that never receives a heartbeat already stays) |
+| 5 | One instance: detect a running engine, `--replace`, `--stay` | **Yes.** `Start-Windlass.ps1` finds a running instance (the Fleet `/__fleethacker/id` check). The same version is reused, and `--open` only reopens the window. `--replace` stops that instance (the shutdown route, then the Fleet port helper's proven stop) and starts this one. A newer copy is still reused and is never replaced by an older launcher. There is no question on the console, because a prompt would block a non-interactive start: pass `--replace` to start fresh. `--stay` keeps the engine after heartbeats stop |
 | 6 | The build stops the app | Not applicable (no build step; C# is compiled at start) |
 | 7 | A runtime file per engine | **Yes.** `logs\windlass-server-<pid>.json` (pid, port, url, start time), removed on stop, stale files removed by the stop script |
-| 8 | An off switch | **Yes.** `WINDLASS_AUTO_STOP=0` or `serve --no-auto-stop` (the standard's `--stay`) |
+| 8 | An off switch | **Yes.** `WINDLASS_AUTO_STOP=0`, `serve --no-auto-stop`, or `serve --stay` |
 
 ## The heartbeat
 
